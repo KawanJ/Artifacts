@@ -4,7 +4,7 @@ from typing import Dict, Tuple
 
 # Resource name to (x, y) coordinates mapping
 RESOURCE_LOCATIONS: Dict[str, Tuple[int, int]] = {
-    "Ash Tree": (-1, 0),
+    "ash_tree": (-1, 0),
 }
 
 
