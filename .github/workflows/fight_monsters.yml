@@ -1,0 +1,34 @@
+name: Fight Monsters
+
+on:
+  workflow_dispatch:
+    inputs:
+      monster_name:
+        description: 'Name of the monster to fight (e.g., Chicken, Cow, Goblin)'
+        required: true
+        type: string
+
+jobs:
+  fight:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Run fight monsters script
+        env:
+          ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
+          ARTIFACTS_CHARACTER_NAME: ${{ secrets.ARTIFACTS_CHARACTER_NAME }}
+          MONSTER_NAME: ${{ inputs.monster_name }}
+          LOG_LEVEL: INFO
+        run: python scripts/fight_monsters.py

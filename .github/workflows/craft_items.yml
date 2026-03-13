@@ -1,0 +1,32 @@
+name: Craft Items
+
+on:
+  workflow_dispatch:
+    inputs:
+      item_code:
+        description: 'Code of the item to craft'
+        required: true
+        type: string
+
+jobs:
+  craft:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Run craft items script
+        env:
+          ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
+          LOG_LEVEL: INFO
+        run: python scripts/craft_items.py ${{ inputs.item_code }}
