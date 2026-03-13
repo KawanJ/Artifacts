@@ -28,7 +28,4 @@ jobs:
       - name: Run fight monsters script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
-          ARTIFACTS_CHARACTER_NAME: ${{ secrets.ARTIFACTS_CHARACTER_NAME }}
-          MONSTER_NAME: ${{ inputs.monster_name }}
-          LOG_LEVEL: INFO
-        run: python scripts/fight_monsters.py
+        run: python scripts/fight_monsters.py ${{ inputs.monster_name }}

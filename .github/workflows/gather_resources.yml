@@ -33,5 +33,4 @@ jobs:
       - name: Run gather resources script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
-          LOG_LEVEL: INFO
         run: python scripts/gather_resources.py "${{ inputs.resource_name }}" ${{ inputs.amount }}
