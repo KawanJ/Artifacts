@@ -28,13 +28,13 @@ def main():
         settings.validate()
         logger.info(f"Settings: {settings}")
         
-        # Get resource name and amount from command line arguments
+        # Get resource code and amount from command line arguments
         if len(sys.argv) < 3:
-            logger.error("Usage: python gather_resources.py <resource_name> <amount>")
-            logger.error("Example: python gather_resources.py 'Copper Ore' 5")
+            logger.error("Usage: python gather_resources.py <resource_code> <amount>")
+            logger.error("Example: python gather_resources.py copper_ore 5")
             return 1
             
-        resource_name = sys.argv[1]
+        resource_code = sys.argv[1]
         try:
             amount = int(sys.argv[2])
             if amount <= 0:
@@ -43,7 +43,7 @@ def main():
             logger.error(f"Invalid amount '{sys.argv[2]}': {e}")
             return 1
             
-        logger.info(f"Gathering {amount}x {resource_name}")
+        logger.info(f"Gathering {amount}x {resource_code}")
         
         # Initialize API client
         with APIClient(
@@ -56,7 +56,7 @@ def main():
             resource_service = ResourceService(client, settings.character_name)
             
             # Gather the resource
-            success = resource_service.gather_resource(resource_name, amount)
+            success = resource_service.gather_resource(resource_code, amount)
             if success:
                 logger.info("✓ Resource gathering completed successfully")
             else:

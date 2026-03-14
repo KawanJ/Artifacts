@@ -3,8 +3,8 @@ name: Gather Resources
 on:
   workflow_dispatch:
     inputs:
-      resource_name:
-        description: 'Name of the resource to gather'
+      resource_code:
+        description: 'Code of the resource to gather'
         required: true
         type: string
       amount:
@@ -33,4 +33,4 @@ jobs:
       - name: Run gather resources script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
-        run: python scripts/gather_resources.py "${{ inputs.resource_name }}" ${{ inputs.amount }}
+        run: python scripts/gather_resources.py "${{ inputs.resource_code }}" ${{ inputs.amount }}

@@ -28,14 +28,22 @@ def main():
         settings.validate()
         logger.info(f"Settings: {settings}")
         
-        # Get item code from command line argument
+        # Get item code and optional quantity from command line arguments
         if len(sys.argv) < 2:
-            logger.error("Usage: python craft_items.py <item_code>")
-            logger.error("Example: python craft_items.py wooden_staff")
+            logger.error("Usage: python craft_items.py <item_code> [quantity]")
+            logger.error("Example: python craft_items.py wooden_staff 3")
             return 1
-            
+
         item_code = sys.argv[1]
-        logger.info(f"Crafting item: {item_code}")
+        quantity = 1
+        if len(sys.argv) > 2:
+            try:
+                quantity = int(sys.argv[2])
+            except ValueError:
+                logger.error(f"Invalid quantity '{sys.argv[2]}'; must be an integer")
+                return 1
+
+        logger.info(f"Crafting item: {item_code} x{quantity}")
         
         # Initialize API client
         with APIClient(
@@ -48,7 +56,7 @@ def main():
             crafting_service = CraftingService(client, settings.character_name)
             
             # Craft the item
-            success = crafting_service.craft_item(item_code)
+            success = crafting_service.craft_item(item_code, quantity=quantity)
             if success:
                 logger.info("✓ Item crafting completed successfully")
             else:

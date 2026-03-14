@@ -7,6 +7,11 @@ on:
         description: 'Code of the item to craft'
         required: true
         type: string
+      quantity:
+        description: 'Number of items to craft'
+        required: false
+        type: number
+        default: 1
 
 jobs:
   craft:
@@ -28,4 +33,4 @@ jobs:
       - name: Run craft items script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
-        run: python scripts/craft_items.py ${{ inputs.item_code }}
+        run: python scripts/craft_items.py ${{ inputs.item_code }} ${{ inputs.quantity }}

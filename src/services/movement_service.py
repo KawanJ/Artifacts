@@ -36,7 +36,7 @@ class MovementService:
                 f"/my/{self.character_name}/action/move",
                 data={"x": x, "y": y}
             )
-            logger.info(f"Move result: {response}")
+            logger.debug(f"Move result: {response}")
 
             # Check for cooldown and wait if necessary
             cooldown_data = response.get("data", {}).get("cooldown")

@@ -27,23 +27,47 @@ def main():
         settings.validate()
         logger.info(f"Settings: {settings}")
         
-        # Get monster name from command line argument or environment variable
-        monster_name = None
-        
+        # Get monster code from command line argument or environment variable
+        monster_code = None
+        fight_count = 1
+
         # Check command line arguments first
         if len(sys.argv) > 1:
-            monster_name = sys.argv[1]
-        # Then check environment variable (for GitHub Actions)
-        elif os.getenv("MONSTER_NAME"):
-            monster_name = os.getenv("MONSTER_NAME")
-        
-        if not monster_name:
-            logger.error("Monster name not provided. Use: python fight_monsters.py <monster_name>")
-            logger.error("Or set MONSTER_NAME environment variable")
+            monster_code = sys.argv[1]
+        if len(sys.argv) > 2:
+            try:
+                fight_count = int(sys.argv[2])
+            except ValueError:
+                logger.error(f"Invalid fight count '{sys.argv[2]}'; must be an integer")
+                return 1
+
+        # Then check environment variables (for GitHub Actions or local env)
+        if not monster_code:
+            if os.getenv("MONSTER_CODE"):
+                monster_code = os.getenv("MONSTER_CODE")
+            elif os.getenv("MONSTER_NAME"):
+                monster_code = os.getenv("MONSTER_NAME")
+
+        if not fight_count:
+            fight_count_env = os.getenv("MONSTER_FIGHT_COUNT") or os.getenv("MONSTER_COUNT")
+            if fight_count_env:
+                try:
+                    fight_count = int(fight_count_env)
+                except ValueError:
+                    logger.error(f"Invalid fight count '{fight_count_env}'; must be an integer")
+                    return 1
+
+        if not monster_code:
+            logger.error("Monster code not provided. Use: python fight_monsters.py <monster_code> [times]")
+            logger.error("Or set MONSTER_CODE (or MONSTER_NAME) environment variable")
             return 1
-        
-        logger.info(f"Target monster: {monster_name}")
-        
+
+        if fight_count <= 0:
+            logger.error("Fight count must be a positive integer")
+            return 1
+
+        logger.info(f"Target monster: {monster_code} (x{fight_count})")
+
         # Initialize API client
         with APIClient(
             api_key=settings.api_key,
@@ -53,10 +77,9 @@ def main():
         ) as client:
             # Initialize service
             combat_service = CombatService(client, settings.character_name)
-            
-            # Fight the monster
-            success = combat_service.fight_monster_by_name(monster_name)
-            
+
+            # Fight the monster multiple times (movement + recovery handled inside service)
+            success = combat_service.fight_monster_by_code(monster_code, count=fight_count)
             if success:
                 logger.info("✓ Monster combat completed successfully")
                 return 0

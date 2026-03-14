@@ -23,22 +23,22 @@ class ResourceService:
         self.character_name = character_name
         self.movement_service = MovementService(api_client, character_name)
 
-    def gather_resource(self, resource_name: str, amount: int = 1) -> bool:
+    def gather_resource(self, resource_code: str, amount: int = 1) -> bool:
         """Gather a specific resource multiple times.
         
         Args:
-            resource_name: Name of the resource to gather.
+            resource_code: Code of the resource to gather.
             amount: Number of times to gather.
         
         Returns:
             True if successful, False otherwise.
         """
-        logger.info(f"Gathering {resource_name} {amount} times...")
+        logger.info(f"Gathering {resource_code} {amount} times...")
         
         try:
             # Get resource coordinates
-            x, y = get_resource_location(resource_name)
-            logger.info(f"Resource {resource_name} is at ({x}, {y})")
+            x, y = get_resource_location(resource_code)
+            logger.info(f"Resource {resource_code} is at ({x}, {y})")
             
             # Move to resource location
             if not self.movement_service.move_to_location(x, y):
@@ -53,7 +53,7 @@ class ResourceService:
                         f"/my/{self.character_name}/action/gathering",
                         data={}
                     )
-                    logger.info(f"Gather result {i + 1}: {response}")
+                    logger.debug(f"Gather result {i + 1}: {response}")
                     
                     # Check for cooldown and wait if necessary
                     cooldown_data = response.get("data", {}).get("cooldown")
@@ -66,7 +66,7 @@ class ResourceService:
                     logger.error(f"Failed to gather on attempt {i + 1}: {e}")
                     return False
             
-            logger.info(f"Successfully gathered {resource_name} {amount} times")
+            logger.info(f"Successfully gathered {resource_code} {amount} times")
             return True
             
         except ValueError as e:

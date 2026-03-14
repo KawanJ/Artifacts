@@ -52,10 +52,10 @@ export ARTIFACTS_CHARACTER_NAME=your_character_name
 ### Run Scripts
 ```bash
 # Gather resources
-python scripts/gather_resources.py "Copper Ore" 5
+python scripts/gather_resources.py copper_ore 5
 
-# Fight monsters
-python scripts/fight_monsters.py Chicken
+# Fight monsters (use the monster code)
+python scripts/fight_monsters.py chicken
 
 # Craft items
 python scripts/craft_items.py wooden_staff

@@ -2,29 +2,30 @@
 from typing import Dict, Tuple
 
 
-# Resource name to (x, y) coordinates mapping
+# Resource code to (x, y) coordinates mapping
 RESOURCE_LOCATIONS: Dict[str, Tuple[int, int]] = {
-    "ash_tree": (-1, 0),
+    "copper_ore": (2, 0),
+    "ash_wood": (-1, 0),
 }
 
 
-def get_resource_location(resource_name: str) -> Tuple[int, int]:
-    """Get the coordinates for a resource by name.
+def get_resource_location(resource_code: str) -> Tuple[int, int]:
+    """Get the coordinates for a resource by code.
 
     Args:
-        resource_name: Name of the resource.
+        resource_code: Code of the resource.
 
     Returns:
         Tuple of (x, y) coordinates.
 
     Raises:
-        ValueError: If resource name is not found.
+        ValueError: If resource code is not found.
     """
-    if resource_name not in RESOURCE_LOCATIONS:
+    if resource_code not in RESOURCE_LOCATIONS:
         available_resources = ", ".join(RESOURCE_LOCATIONS.keys())
         raise ValueError(
-            f"Unknown resource '{resource_name}'. "
+            f"Unknown resource '{resource_code}'. "
             f"Available resources: {available_resources}"
         )
 
-    return RESOURCE_LOCATIONS[resource_name]
+    return RESOURCE_LOCATIONS[resource_code]
