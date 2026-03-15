@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config.settings import settings
 from src.client.api_client import APIClient
 from src.services.crafting_service import CraftingService
+from src.services.item_service import ItemService
 
 # Configure logging for GitHub Actions
 logging.basicConfig(
@@ -36,6 +37,8 @@ def main():
 
         item_code = sys.argv[1]
         quantity = 1
+        recycle = False
+
         if len(sys.argv) > 2:
             try:
                 quantity = int(sys.argv[2])
@@ -43,7 +46,11 @@ def main():
                 logger.error(f"Invalid quantity '{sys.argv[2]}'; must be an integer")
                 return 1
 
-        logger.info(f"Crafting item: {item_code} x{quantity}")
+        if len(sys.argv) > 3:
+            recycle_arg = sys.argv[3].strip().lower()
+            recycle = recycle_arg in ("true", "1", "yes", "y")
+
+        logger.info(f"Crafting item: {item_code} x{quantity} (recycle={recycle})")
         
         # Initialize API client
         with APIClient(
@@ -52,13 +59,21 @@ def main():
             max_retries=settings.max_retries,
             timeout=settings.request_timeout,
         ) as client:
-            # Initialize service
+            # Initialize services
             crafting_service = CraftingService(client, settings.character_name)
-            
+            item_service = ItemService(client)
+
             # Craft the item
             success = crafting_service.craft_item(item_code, quantity=quantity)
             if success:
                 logger.info("✓ Item crafting completed successfully")
+
+                if recycle:
+                    logger.info("Recycling crafted items...")
+                    if item_service.recycle_item(settings.character_name, item_code, quantity=quantity):
+                        logger.info("✓ Recycling completed successfully")
+                    else:
+                        logger.warning("⚠ Recycling failed")
             else:
                 logger.warning("⚠ Item crafting may have failed")
         

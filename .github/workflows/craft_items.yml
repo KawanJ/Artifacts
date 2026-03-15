@@ -12,6 +12,11 @@ on:
         required: false
         type: number
         default: 1
+      recycle:
+        description: 'Whether to recycle the crafted items (true/false)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   craft:
@@ -33,4 +38,4 @@ jobs:
       - name: Run craft items script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
-        run: python scripts/craft_items.py ${{ inputs.item_code }} ${{ inputs.quantity }}
+        run: python scripts/craft_items.py ${{ inputs.item_code }} ${{ inputs.quantity }} ${{ inputs.recycle }}

@@ -5,6 +5,7 @@ from typing import Dict, Tuple
 # Monster code to (x, y) coordinates mapping
 MONSTER_LOCATIONS: Dict[str, Tuple[int, int]] = {
     "chicken": (0, 1),
+    "yellow_slime": (1, -2),
 }
 
 
