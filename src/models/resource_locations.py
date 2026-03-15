@@ -6,6 +6,7 @@ from typing import Dict, Tuple
 RESOURCE_LOCATIONS: Dict[str, Tuple[int, int]] = {
     "copper_ore": (2, 0),
     "ash_wood": (-1, 0),
+    "gudgeon": (4, 2)
 }
 
 
