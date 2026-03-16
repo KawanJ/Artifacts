@@ -1,36 +1,39 @@
-name: Craft Items
+name: Craft and Recycle
 
 on:
   workflow_dispatch:
     inputs:
       item_code:
-        description: 'Code of the item to craft'
+        description: 'Code of the item to craft and recycle'
         required: true
         type: string
-      quantity:
-        description: 'Number of times to craft the item'
+      cycles:
+        description: 'Number of craft+recycle cycles to perform'
         required: false
         type: number
         default: 1
 
 jobs:
-  craft:
+  craft_and_recycle:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.13'
           cache: 'pip'
-      
+
       - name: Install dependencies
         run: pip install -r requirements.txt
-      
-      - name: Run craft items script
+
+      - name: Run craft-and-recycle script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
-        run: python scripts/craft_items.py ${{ inputs.item_code }} ${{ inputs.quantity }}
+        run: |
+          python scripts/craft_and_recycle.py \
+            ${{ inputs.item_code }} \
+            ${{ inputs.cycles }}
