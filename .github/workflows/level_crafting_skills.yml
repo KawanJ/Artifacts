@@ -1,20 +1,19 @@
-name: Craft and Recycle
+name: Craft to Skill Level
 
 on:
   workflow_dispatch:
     inputs:
-      item_code:
-        description: 'Code of the item to craft and recycle'
+      skill:
+        description: 'Crafting skill to level (weaponcrafting, gearcrafting, jewelrycrafting)'
         required: true
         type: string
-      cycles:
-        description: 'Number of craft+recycle cycles to perform'
-        required: false
-        type: number
-        default: 1
+      item_code:
+        description: 'Code of the item to craft for XP'
+        required: true
+        type: string
 
 jobs:
-  craft_and_recycle:
+  level_crafting_skills:
     runs-on: ubuntu-latest
 
     steps:
@@ -30,10 +29,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run craft-and-recycle script
+      - name: Run level-crafting-skills script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
         run: |
-          python scripts/craft_and_recycle.py \
-            ${{ inputs.item_code }} \
-            ${{ inputs.cycles }}
+          python scripts/level_crafting_skills.py \
+            ${{ inputs.skill }} \
+            ${{ inputs.item_code }}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Script to craft items and immediately recycle them (runs via GitHub Actions workflow)."""
+"""Script to craft items, recycle them, and stop when the specified crafting skill increases."""
 import logging
 import sys
 import os
@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config.settings import settings
 from src.client.api_client import APIClient
 from src.services.crafting_service import CraftingService
+from src.services.character_service import CharacterService
 from src.services.item_service import ItemService
 
 # Configure logging for GitHub Actions
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    """Main entry point for the craft and recycle action."""
-    logger.info("Starting craft-and-recycle automation...")
+    """Main entry point for the level-crafting-skills action."""
+    logger.info("Starting level-crafting-skills automation...")
 
     try:
         # Validate settings
@@ -30,21 +31,15 @@ def main():
         logger.info(f"Settings: {settings}")
 
         # Parse arguments
-        if len(sys.argv) < 2:
-            logger.error("Usage: python craft_and_recycle.py <item_code> [cycles]")
-            logger.error("Example: python craft_and_recycle.py wooden_staff 5")
+        if len(sys.argv) < 3:
+            logger.error("Usage: python level_crafting_skills.py <skill> <item_code>")
+            logger.error("Example: python level_crafting_skills.py weaponcrafting wooden_staff")
             return 1
 
-        item_code = sys.argv[1]
-        cycles = 1
-        if len(sys.argv) > 2:
-            try:
-                cycles = int(sys.argv[2])
-            except ValueError:
-                logger.error(f"Invalid cycles '{sys.argv[2]}'; must be an integer")
-                return 1
+        skill = sys.argv[1]
+        item_code = sys.argv[2]
 
-        logger.info(f"Crafting and recycling {item_code} 1x per cycle, {cycles} cycle(s)")
+        logger.info(f"Upgrading skill '{skill}' by crafting {item_code}")
 
         with APIClient(
             api_key=settings.api_key,
@@ -54,20 +49,29 @@ def main():
         ) as client:
             crafting_service = CraftingService(client, settings.character_name)
             item_service = ItemService(client)
+            character_service = CharacterService(client, settings.character_name)
 
-            for cycle in range(1, cycles + 1):
-                logger.info(f"Cycle {cycle}/{cycles}: crafting {item_code} x1")
+            # Starting skill level
+            start_level = character_service.get_skill_level(skill)
+            logger.info(f"Starting {skill} level: {start_level}")
+
+            cycle = 0
+            while True:
+                cycle += 1
+                logger.info(f"Cycle {cycle}: crafting {item_code} x1")
                 if not crafting_service.craft_item(item_code, quantity=1):
                     logger.error("✗ Crafting failed")
                     return 1
 
-                logger.info(f"Cycle {cycle}/{cycles}: recycling {item_code} x1")
+                logger.info(f"Cycle {cycle}: recycling {item_code} x1")
                 if not item_service.recycle_item(settings.character_name, item_code, quantity=1):
                     logger.error("✗ Recycling failed")
                     return 1
 
-            logger.info("✓ Craft-and-recycle automation completed successfully")
-            return 0
+                current_level = character_service.get_skill_level(skill)
+                if current_level > start_level:
+                    logger.info(f"Skill '{skill}' increased from {start_level} to {current_level}; stopping.")
+                    return 0
 
     except ValueError as e:
         logger.error(f"Configuration error: {e}")

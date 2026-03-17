@@ -42,6 +42,15 @@ class CharacterService:
         logger.debug(f"HP status: {hp}/{max_hp}")
         return hp, max_hp
 
+    def get_skill_level(self, skill_name: str) -> int:
+        """Return the current level for the given skill."""
+        data = self.get_character_data()
+        skills = data.get("skills", {}) or {}
+        skill_data = skills.get(skill_name, {}) or {}
+        level = skill_data.get("level", 0) or 0
+        logger.debug(f"Skill '{skill_name}' level: {level}")
+        return level
+
     def get_inventory(self) -> Dict[str, int]:
         """Return a mapping of item codes to quantities in the character inventory."""
         data = self.get_character_data()
