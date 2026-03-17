@@ -6,6 +6,14 @@ from typing import Dict, Tuple
 MONSTER_LOCATIONS: Dict[str, Tuple[int, int]] = {
     "chicken": (0, 1),
     "yellow_slime": (1, -2),
+    "blue_slime": (0, -2),
+    "green_slime": (0, -1),
+    "red_slime": (1, -1),
+    "king_slime": (3, -1),
+    "cow": (0, 2),
+    "wolf": (-2, 1),
+    "pig": (-3, -3),
+    "sheep": (5, 12),
 }
 
 

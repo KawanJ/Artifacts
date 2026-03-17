@@ -64,7 +64,7 @@ class CombatService:
                 f"/my/{self.character_name}/action/rest",
                 data={}
             )
-            logger.info(f"Rest result: {response}")
+            logger.debug(f"Rest result: {response}")
 
             # Check for cooldown and wait if necessary
             cooldown_data = response.get("data", {}).get("cooldown")
