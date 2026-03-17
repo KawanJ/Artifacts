@@ -10,6 +10,7 @@ CRAFTING_LOCATIONS: Dict[str, Tuple[int, int]] = {
     "jewelrycrafting": (1, 3),
     "woodcutting": (-2, -3),
     "cooking": (1, 1),
+    "alchemy": (2, 3),
 }
 
 
