@@ -1,10 +1,11 @@
 """Combat service for fighting monsters."""
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
-from src.client.api_client import APIClient
+from src.client.api_client import APIClient, APIError
 from src.models.monster_locations import get_monster_location
+from src.services.banking_service import BankingService
 from src.services.character_service import CharacterService
 from src.services.movement_service import MovementService
 
@@ -25,13 +26,22 @@ class CombatService:
         self.character_name = character_name
         self.movement_service = MovementService(api_client, character_name)
         self.character_service = CharacterService(api_client, character_name)
+        self.banking_service = BankingService(api_client, character_name)
 
-    def fight_monster(self) -> Dict[str, Any]:
-        """Fight a monster at current location.
+    def _move_to_monster(self, monster_code: str) -> bool:
+        # Get monster coordinates
+        x, y = get_monster_location(monster_code)
+        logger.info(f"Monster {monster_code} is at ({x}, {y})")
+
+        # Move to location once
+        if not self.movement_service.move_to_location(x, y):
+            logger.error("Failed to move to monster location")
+            return False
         
-        Returns:
-            Response data if successful, empty dict otherwise.
-        """
+        return True
+
+    def _fight_once(self, monster_code: str, allow_retry: bool = True) -> Dict[str, Any]:
+        """Perform a single fight; optionally retry once after banking common items."""
         logger.info("Starting fight...")
         try:
             response = self.api_client.post(
@@ -39,18 +49,43 @@ class CombatService:
                 data={}
             )
             logger.debug(f"Fight result: {response}")
-            
+
             # Check for cooldown and wait if necessary
             cooldown_data = response.get("data", {}).get("cooldown")
             if cooldown_data and "total_seconds" in cooldown_data:
                 cooldown_seconds = cooldown_data["total_seconds"]
                 logger.info(f"Waiting {cooldown_seconds} seconds for fight cooldown...")
                 time.sleep(cooldown_seconds)
-            
+
             return response
+
+        except APIError as e:
+            # If inventory is full, deposit common items and retry once
+            if allow_retry and e.status_code == 497:
+                logger.warning("Inventory full during fight; depositing common items and retrying...")
+                if not self.banking_service.deposit_common_items():
+                    logger.error("Failed to deposit common items; aborting fight.")
+                    return {}
+                
+                if not self._move_to_monster(monster_code):
+                    return False
+            
+                return self._fight_once(monster_code, allow_retry=False)
+
+            logger.error(f"Failed to fight monster: {e}")
+            return {}
+
         except Exception as e:
             logger.error(f"Failed to fight monster: {e}")
             return {}
+
+    def fight_monster(self, monster_code: str) -> Dict[str, Any]:
+        """Fight a monster at current location.
+
+        Returns:
+            Response data if successful, empty dict otherwise.
+        """
+        return self._fight_once(monster_code)
 
     def rest(self) -> bool:
         """Rest to recover health/mana.
@@ -168,18 +203,12 @@ class CombatService:
         logger.info(f"Fighting monster: {monster_code} x{count}")
 
         try:
-            # Get monster coordinates
-            x, y = get_monster_location(monster_code)
-            logger.info(f"Monster {monster_code} is at ({x}, {y})")
-
-            # Move to location once
-            if not self.movement_service.move_to_location(x, y):
-                logger.error("Failed to move to monster location")
+            if not self._move_to_monster(monster_code):
                 return False
 
             # If only fighting once, just fight then rest
             if count == 1:
-                fight_response = self.fight_monster()
+                fight_response = self.fight_monster(monster_code)
                 if not fight_response:
                     logger.error("Failed to fight monster")
                     return False
@@ -193,7 +222,7 @@ class CombatService:
             max_hp = self.character_service.get_hp_status()[1]
 
             # First fight -> compute expected hit
-            fight_response = self.fight_monster()
+            fight_response = self.fight_monster(monster_code)
             if not fight_response:
                 logger.error("Failed to fight monster")
                 return False
@@ -209,7 +238,7 @@ class CombatService:
             # Subsequent fights
             for attempt in range(2, count + 1):
                 logger.info(f"Fight attempt {attempt}/{count} for {monster_code}")
-                fight_response = self.fight_monster()
+                fight_response = self.fight_monster(monster_code)
                 if not fight_response:
                     logger.error("Failed to fight monster")
                     return False
