@@ -3,6 +3,8 @@ import logging
 import time
 from src.client.api_client import APIClient, APIError
 from src.services.banking_service import BankingService
+from src.services.character_service import CharacterService
+from src.services.item_service import ItemService
 from src.services.movement_service import MovementService
 from src.models.resource_locations import get_resource_location
 
@@ -23,6 +25,8 @@ class ResourceService:
         self.character_name = character_name
         self.movement_service = MovementService(api_client, character_name)
         self.banking_service = BankingService(api_client, character_name)
+        self.character_service = CharacterService(api_client, character_name)
+        self.item_service = ItemService(api_client)
 
     def _move_to_resource(self, resource_code: str) -> bool:
         # Get resource coordinates
@@ -35,6 +39,26 @@ class ResourceService:
             return False
         
         return True
+
+    def _get_tool_for_resource(self, subtype: str | None = None) -> str | None:
+        """Return the preferred gathering tool for a given resource.
+
+        If a subtype is provided (from item metadata) it will be used to determine
+        the tool. Otherwise, it falls back to keyword matching in the resource code.
+        """
+        # Prefer using subtype from item metadata when available.
+        if subtype:
+            subtype_tool_map = {
+                "mining": "copper_pickaxe",
+                "woodcutting": "copper_axe",
+                "fishing": "fishing_net",
+                "alchemy": "apprentice_gloves",
+            }
+            tool = subtype_tool_map.get(subtype)
+            if tool:
+                return tool
+
+        return None
 
     def _gather_once(self, resource_code: str, attempt: int, allow_retry: bool = True) -> bool:
         """Attempt a single gather action, optionally retrying after banking if inventory is full."""
@@ -88,6 +112,21 @@ class ResourceService:
         try:
             if not self._move_to_resource(resource_code):
                 return False
+
+            # Try to determine the correct gathering tool from item metadata
+            subtype = None
+            try:
+                item_data = self.item_service.get_item(resource_code)
+                subtype = item_data.get("subtype") if isinstance(item_data, dict) else None
+            except Exception as e:
+                logger.warning(f"Could not fetch item data for {resource_code}: {e}")
+
+            tool = self._get_tool_for_resource(subtype)
+            if tool:
+                logger.info(f"Equipping tool '{tool}' for resource '{resource_code}' (subtype={subtype})")
+                if not self.character_service.equip_item(tool):
+                    logger.error(f"Failed to equip tool '{tool}' for resource '{resource_code}'")
+                    return False
 
             # Gather the specified amount of times
             for i in range(amount):

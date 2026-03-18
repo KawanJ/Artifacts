@@ -1,4 +1,4 @@
-name: Craft to Skill Level
+name: Level crafting skills
 
 on:
   workflow_dispatch:

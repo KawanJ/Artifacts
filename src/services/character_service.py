@@ -45,9 +45,7 @@ class CharacterService:
     def get_skill_level(self, skill_name: str) -> int:
         """Return the current level for the given skill."""
         data = self.get_character_data()
-        skills = data.get("skills", {}) or {}
-        skill_data = skills.get(skill_name, {}) or {}
-        level = skill_data.get("level", 0) or 0
+        level = data.get(f"{skill_name}_level", {}) or {}
         logger.debug(f"Skill '{skill_name}' level: {level}")
         return level
 
@@ -98,4 +96,25 @@ class CharacterService:
             return True
         except Exception as e:
             logger.error(f"Failed to use healing item {item_code}: {e}")
+            return False
+
+    def equip_item(self, item_code: str, slot: str = "weapon") -> bool:
+        """Equip an item in the specified slot."""
+        logger.info(f"Equipping item '{item_code}' into slot '{slot}'")
+        try:
+            response = self.api_client.post(
+                f"/my/{self.character_name}/action/equip",
+                data={"code": item_code, "slot": slot},
+            )
+            logger.debug(f"Equip response: {response}")
+
+            cooldown_data = response.get("data", {}).get("cooldown")
+            if cooldown_data and "total_seconds" in cooldown_data:
+                cooldown_seconds = cooldown_data["total_seconds"]
+                logger.info(f"Waiting {cooldown_seconds} seconds after equipping item...")
+                time.sleep(cooldown_seconds)
+
+            return True
+        except Exception as e:
+            logger.error(f"Failed to equip item {item_code}: {e}")
             return False
