@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from src.client.api_client import APIClient
 from src.models.crafting_locations import get_crafting_location
 from src.services.character_service import CharacterService
+from src.services.combat_service import CombatService
 from src.services.item_service import ItemService
 from src.services.movement_service import MovementService
 from src.services.resource_service import ResourceService
@@ -29,6 +30,7 @@ class CraftingService:
         self.item_service = ItemService(api_client)
         self.resource_service = ResourceService(api_client, character_name)
         self.character_service = CharacterService(api_client, character_name)
+        self.combat_service = CombatService(api_client, character_name)
 
     def _craft_once(self, item_code: str, quantity: int = 1) -> bool:
         """Perform a craft action for the given item code (optionally multiple at once)."""
@@ -103,6 +105,7 @@ class CraftingService:
                 return False
 
             required_type = required_item.get("type")
+            required_subtype = required_item.get("subtype")
 
             # If this item itself can be crafted, recurse
             if required_item.get("craft"):
@@ -112,12 +115,26 @@ class CraftingService:
 
             # If it's a resource, gather it
             if required_type == "resource":
-                logger.info(
-                    f"Gathering required resource: {required_code} x{required_quantity}"
-                )
-                if not self.resource_service.gather_resource(required_code, required_quantity):
-                    return False
-                continue
+                if required_subtype == "mob":
+                    logger.info(
+                        f"Farming mob drop required resource: {required_code} x{required_quantity}"
+                    )
+                    monster_code = self.combat_service.get_monster_code_for_drop(required_code)
+                    if not monster_code:
+                        logger.warning(
+                            f"No direct monster mapping for mob drop {required_code}, trying fallback prefix logic"
+                        )
+
+                    if not self.combat_service.farm_drops(required_code, required_quantity, monster_code=monster_code):
+                        return False
+                    continue
+                else:
+                    logger.info(
+                        f"Gathering required resource: {required_code} x{required_quantity}"
+                    )
+                    if not self.resource_service.gather_resource(required_code, required_quantity):
+                        return False
+                    continue
 
             # Unknown item type; log and continue
             logger.warning(

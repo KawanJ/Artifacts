@@ -24,6 +24,11 @@ class BankingService:
         "raw_chicken",
         "egg",
         "feather",
+        "sap",
+        "topaz_stone",
+        "emerald_stone",
+        "ruby_stone",
+        "sapphire_stone",
     ]
 
     def __init__(self, api_client: APIClient, character_name: str):

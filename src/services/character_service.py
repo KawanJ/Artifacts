@@ -15,6 +15,7 @@ class CharacterService:
     HEALING_ITEMS: Dict[str, int] = {
         "apple": 50,
         "cooked_chicken": 80,
+        "fried_eggs": 150,
     }
 
     def __init__(self, api_client: APIClient, character_name: str):
