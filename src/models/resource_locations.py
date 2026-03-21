@@ -5,7 +5,9 @@ from typing import Dict, Tuple
 # Resource code to (x, y) coordinates mapping
 RESOURCE_LOCATIONS: Dict[str, Tuple[int, int]] = {
     "copper_ore": (2, 0),
+    "iron_ore": (1, 7),
     "ash_wood": (-1, 0),
+    "spruce_wood": (2, 6),
     "gudgeon": (4, 2),
     "sunflower": (2, 2),
 }

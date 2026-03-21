@@ -16,7 +16,7 @@ class CombatService:
     """Service for managing combat and monster fights."""
 
     # Default weapon to equip before combat loops.
-    COMBAT_WEAPON_CODE = "water_bow"
+    COMBAT_WEAPON_CODE = "iron_sword"
 
     # Static mapping from mob-drop item codes to monster codes.
     MOB_DROP_TO_MONSTER: Dict[str, str] = {

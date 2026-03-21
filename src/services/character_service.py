@@ -14,6 +14,7 @@ class CharacterService:
     # Healing items mapping (code -> heal amount)
     HEALING_ITEMS: Dict[str, int] = {
         "apple": 50,
+        "cooked_gudgeon": 75,
         "cooked_chicken": 80,
         "fried_eggs": 150,
     }
