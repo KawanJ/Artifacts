@@ -79,3 +79,12 @@ the current item data. The resource's gathering subtype is still read from its
 item metadata, and the character inventory/equipment is checked to select the
 strongest listed tool the character owns. If no listed tool is available or
 equip attempts fail, gathering continues without one.
+
+## Combat Weapons
+
+Weapon codes and their order are maintained in `src/models/combat_weapons.py`;
+the strongest known weapons appear first. Before fighting, the combat service
+checks the character's inventory and equipped weapon, then equips the first
+listed weapon the character owns. Refresh and reorder this list when game
+weapon data changes. If no listed weapon is available or equip attempts fail,
+combat continues without changing equipment.

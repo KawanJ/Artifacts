@@ -4,6 +4,7 @@ import time
 from typing import Dict, Any
 
 from src.client.api_client import APIClient, APIError
+from src.models.combat_weapons import COMBAT_WEAPONS
 from src.models.monster_locations import get_monster_location
 from src.services.banking_service import BankingService
 from src.services.character_service import CharacterService
@@ -14,9 +15,6 @@ logger = logging.getLogger(__name__)
 
 class CombatService:
     """Service for managing combat and monster fights."""
-
-    # Default weapon to equip before combat loops.
-    COMBAT_WEAPON_CODE = "iron_sword"
 
     # Static mapping from mob-drop item codes to monster codes.
     MOB_DROP_TO_MONSTER: Dict[str, str] = {
@@ -40,15 +38,44 @@ class CombatService:
         self.banking_service = BankingService(api_client, character_name)
 
     def _equip_combat_weapon(self) -> bool:
-        """Equip the default combat weapon before starting combat loop."""
-        if not self.COMBAT_WEAPON_CODE:
-            return True
+        """Equip the strongest owned weapon from the ordered weapon catalogue."""
+        try:
+            character_data = self.character_service.get_character_data()
+        except Exception as e:
+            logger.warning(f"Could not determine an available combat weapon: {e}")
+            return False
 
-        logger.info(f"Equipping combat weapon: {self.COMBAT_WEAPON_CODE}")
-        success = self.character_service.equip_item(self.COMBAT_WEAPON_CODE)
-        if not success:
-            logger.warning(f"Failed to equip combat weapon {self.COMBAT_WEAPON_CODE}")
-        return success
+        inventory = character_data.get("inventory", []) or []
+        inventory_codes = {
+            entry.get("code")
+            for entry in inventory
+            if isinstance(entry, dict)
+            and entry.get("code")
+            and (entry.get("quantity", 0) or 0) > 0
+        }
+        equipped_code = character_data.get("weapon_slot")
+        available_codes = inventory_codes | ({equipped_code} if equipped_code else set())
+        candidates = [
+            weapon_code
+            for weapon_code in COMBAT_WEAPONS
+            if weapon_code in available_codes
+        ]
+        if not candidates:
+            logger.info("No owned combat weapon found; continuing without changing equipment.")
+            return False
+
+        for weapon_code in candidates:
+            if weapon_code == equipped_code:
+                logger.info(f"Best available combat weapon '{weapon_code}' is already equipped.")
+                return True
+
+            logger.info(f"Equipping best available combat weapon '{weapon_code}'.")
+            if self.character_service.equip_item(weapon_code):
+                return True
+            logger.warning(f"Could not equip combat weapon '{weapon_code}'; trying another.")
+
+        logger.warning("No available combat weapon could be equipped.")
+        return False
 
     def get_monster_code_for_drop(self, drop_code: str) -> str | None:
         """Get monster code for a mob drop item code using the mapping."""
