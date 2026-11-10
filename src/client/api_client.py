@@ -1,7 +1,7 @@
 """API Client for Artifacts MMO."""
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional, Union
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -78,7 +78,7 @@ class APIClient:
         self,
         method: str,
         endpoint: str,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
         params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Make an HTTP request to the API.
@@ -140,7 +140,7 @@ class APIClient:
     def post(
         self,
         endpoint: str,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
         params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Make a POST request.

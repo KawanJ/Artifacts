@@ -69,3 +69,13 @@ python scripts/craft_items.py wooden_staff
 - **src/models/**: Data structures and location mappings
 - **src/config/**: Environment variable management
 - **.github/workflows/**: GitHub Actions for remote execution
+
+## Gathering Tools
+
+Gathering tool codes and their bonuses are maintained locally in
+`src/models/gathering_tools.py`; the automation does not fetch tool catalogue
+data from the API. At the start of each game season, refresh this table from
+the current item data. The resource's gathering subtype is still read from its
+item metadata, and the character inventory/equipment is checked to select the
+strongest listed tool the character owns. If no listed tool is available or
+equip attempts fail, gathering continues without one.

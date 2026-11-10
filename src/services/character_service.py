@@ -106,7 +106,7 @@ class CharacterService:
         try:
             response = self.api_client.post(
                 f"/my/{self.character_name}/action/equip",
-                data={"code": item_code, "slot": slot},
+                data=[{"code": item_code, "slot": slot}],
             )
             logger.debug(f"Equip response: {response}")
 
