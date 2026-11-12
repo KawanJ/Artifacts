@@ -64,6 +64,35 @@ class CombatService:
         return math.floor(value + 0.5)
 
     @classmethod
+    def _damage_per_turn(
+        cls,
+        attacker_data: Dict[str, Any],
+        target_data: Dict[str, Any],
+        critical: bool,
+    ) -> int:
+        """Estimate damage per turn against a target, with or without a critical hit."""
+        total_damage = 0
+        critical_strike = float(attacker_data.get("critical_strike", 0) or 0)
+        for element in ELEMENTS:
+            attack = cls._round_damage(
+                float(attacker_data.get(f"attack_{element}", 0) or 0)
+                * (
+                    1
+                    + (
+                        float(attacker_data.get("dmg", 0) or 0)
+                        + float(attacker_data.get(f"dmg_{element}", 0) or 0)
+                    )
+                    / 100
+                )
+            )
+            resistance = float(target_data.get(f"res_{element}", 0) or 0)
+            damage = max(0, cls._round_damage(attack * (1 - resistance / 100)))
+            if critical and critical_strike > 0:
+                damage = cls._round_damage(damage * 1.5)
+            total_damage += damage
+        return total_damage
+
+    @classmethod
     def _weapon_expected_damage(
         cls,
         character_data: Dict[str, Any],
@@ -94,6 +123,56 @@ class CombatService:
             )
 
         return expected_damage
+
+    def _minimum_hp_to_fight(self, monster_code: str) -> int:
+        """Estimate HP needed to survive the fight using minimum player damage."""
+        character_data = self.character_service.get_character_data()
+        monster_response = self.api_client.get(f"/monsters/{monster_code}")
+        monster_data = monster_response.get("data")
+        if not isinstance(monster_data, dict):
+            raise ValueError(f"No monster data returned for {monster_code}")
+
+        max_hp = int(character_data.get("max_hp", 0) or 0)
+        monster_hp = int(monster_data.get("hp", 0) or 0)
+        if max_hp <= 0 or monster_hp <= 0:
+            raise ValueError(f"Invalid HP data for combat with {monster_code}")
+
+        minimum_player_damage = self._damage_per_turn(
+            character_data, monster_data, critical=False
+        )
+        maximum_monster_damage = self._damage_per_turn(
+            monster_data, character_data, critical=True
+        )
+        if minimum_player_damage <= 0:
+            logger.warning(
+                "Could not estimate positive minimum damage against %s; requiring full HP.",
+                monster_code,
+            )
+            return max_hp
+
+        turns_to_defeat = math.ceil(monster_hp / minimum_player_damage)
+        maximum_fight_damage = turns_to_defeat * maximum_monster_damage
+        required_hp = maximum_fight_damage + 1
+        if required_hp > max_hp:
+            logger.warning(
+                "Worst-case estimated damage from %s (%s HP) exceeds max HP (%s); "
+                "preparing at max HP.",
+                monster_code,
+                maximum_fight_damage,
+                max_hp,
+            )
+            return max_hp
+
+        logger.info(
+            "Estimated fight threshold for %s: %s HP "
+            "(minimum player damage %s/turn, maximum monster damage %s/turn, %s turns).",
+            monster_code,
+            required_hp,
+            minimum_player_damage,
+            maximum_monster_damage,
+            turns_to_defeat,
+        )
+        return max(1, required_hp)
 
     def _equip_combat_weapon(self, monster_code: str) -> bool:
         """Equip the owned weapon with the highest expected damage against a monster."""
@@ -285,12 +364,16 @@ class CombatService:
         if not self._move_to_monster(monster_code):
             return False
 
+        required_hp = self._minimum_hp_to_fight(monster_code)
         collected = 0
         attempts = 0
-        next_hit_estimate = 0
         while collected < target_quantity:
             attempts += 1
             logger.info(f"Combat drop farm attempt {attempts}: collected {collected}/{target_quantity} {target_item_code}")
+            if not self._recover_to_hp(required_hp):
+                logger.error("Failed to reach the required HP before farming fight")
+                return False
+
             fight_response = self._fight_once(monster_code)
             if not fight_response:
                 logger.error("Fight failed during drop farm; aborting")
@@ -315,16 +398,6 @@ class CombatService:
                 self.rest()
                 logger.info(f"Target drop quantity reached: {collected}/{target_quantity}")
                 return True
-
-            # Recover between fights (simplified with heal/rest call)
-            if next_hit_estimate == 0:
-                hp, max_hp = self.character_service.get_hp_status()
-                next_hit_estimate = max_hp - hp
-                logger.debug(f"Estimated next hit damage after first fight: {next_hit_estimate}")
-
-            if not self._heal_or_rest(next_hit_estimate):
-                logger.error("Failed to recover between fights during farming")
-                return False
 
         return True
 
@@ -354,82 +427,56 @@ class CombatService:
             logger.error(f"Failed to rest: {e}")
             return False
 
-    def _heal_or_rest(self, expected_next_hit: int) -> bool:
-        """Heal using healing items if possible, otherwise rest.
+    def _recover_to_hp(self, target_hp: int) -> bool:
+        """Recover to a target HP using non-overflowing healing items before resting.
 
         Args:
-            expected_next_hit: Estimated damage of the next incoming hit.
+            target_hp: Minimum HP to have before the next fight.
 
         Returns:
             True if recovery succeeded, False otherwise.
         """
         hp, max_hp = self.character_service.get_hp_status()
-        missing_hp = max_hp - hp
-
-        # If there are no upcoming fights (expected_next_hit <= 0), just rest.
-        if expected_next_hit <= 0:
-            logger.debug("No upcoming hit expected; resting.")
-            return self.rest()
-
-        if missing_hp <= 0:
-            logger.debug("HP is full; no healing needed.")
+        target_hp = min(max(target_hp, 1), max_hp)
+        if hp >= target_hp:
+            logger.debug("HP is already at the required fight threshold.")
             return True
 
         healing_items = self.character_service.get_available_healing_items()
-        # Helper to decide if current HP can survive the next hit
-        def can_survive(current_hp: int) -> bool:
-            return current_hp > expected_next_hit
-
-        # Apply healing while possible until we can survive the next hit
-        # using smallest heal items first.
-        while True:
-            hp, max_hp = self.character_service.get_hp_status()
+        while hp < target_hp:
             missing_hp = max_hp - hp
-
-            # If we can already survive next hit, attempt to apply a non-overflow heal (smallest) once.
-            if can_survive(hp):
-                # Find smallest item that does not overflow
-                non_overflow_items = [
-                    (code, qty, heal)
-                    for code, (qty, heal) in healing_items.items()
-                    if qty > 0 and heal <= missing_hp
-                ]
-                if non_overflow_items:
-                    code, qty, heal_amount = min(non_overflow_items, key=lambda t: t[2])
-                    logger.info(
-                        f"Using healing item '{code}' (heal {heal_amount}) without overflow; "
-                        f"current HP={hp}/{max_hp}"
-                    )
-                    if self.character_service.use_healing_item(code):
-                        healing_items[code] = (qty - 1, heal_amount)
-                        continue
-                    logger.warning("Failed to use healing item; falling back to rest.")
-                    return self.rest()
-
-                # No non-overflow items available; we can survive next hit, so continue
-                return True
-
-            # If we cannot survive the next hit, attempt to heal using smallest available item (even if it overflows)
             usable_items = [
                 (code, qty, heal)
                 for code, (qty, heal) in healing_items.items()
-                if qty > 0
+                if qty > 0 and heal <= missing_hp
             ]
             if usable_items:
-                code, qty, heal_amount = min(usable_items, key=lambda t: t[2])
+                code, qty, heal_amount = min(usable_items, key=lambda item: item[2])
                 logger.info(
-                    f"Healing needed to survive next hit (expected {expected_next_hit}). "
-                    f"Using '{code}' (heal {heal_amount})"
+                    "Using healing item '%s' (heal %s) without overflow; current HP=%s/%s.",
+                    code,
+                    heal_amount,
+                    hp,
+                    max_hp,
                 )
-                if self.character_service.use_healing_item(code):
-                    healing_items[code] = (qty - 1, heal_amount)
+                if not self.character_service.use_healing_item(code):
+                    logger.warning("Failed to use healing item; falling back to rest.")
+                    healing_items[code] = (0, heal_amount)
                     continue
-                logger.warning("Failed to use healing item; falling back to rest.")
-                return self.rest()
+                healing_items[code] = (qty - 1, heal_amount)
+                hp, max_hp = self.character_service.get_hp_status()
+                continue
 
-            # No healing items remain; fall back to rest
-            logger.info("Out of healing items; resting instead.")
-            return self.rest()
+            logger.info("No non-overflowing healing item available; resting.")
+            if not self.rest():
+                return False
+            new_hp, max_hp = self.character_service.get_hp_status()
+            if new_hp <= hp:
+                logger.error("Rest did not increase HP toward the required fight threshold.")
+                return False
+            hp = new_hp
+
+        return hp >= target_hp
 
     def fight_monster_by_code(self, monster_code: str, count: int = 1) -> bool:
         """Move to monster location and fight it multiple times.
@@ -450,38 +497,13 @@ class CombatService:
             if not self._move_to_monster(monster_code):
                 return False
 
-            # If only fighting once, just fight then rest
-            if count == 1:
-                fight_response = self.fight_monster(monster_code)
-                if not fight_response:
-                    logger.error("Failed to fight monster")
-                    return False
-                if not self.rest():
-                    logger.error("Failed to rest after fight")
-                    return False
-                logger.info(f"Successfully fought {monster_code} once")
-                return True
-
-            # Multi-fight: compute expected hit damage from the first fight and use that for recovery logic
-            max_hp = self.character_service.get_hp_status()[1]
-
-            # First fight -> compute expected hit
-            fight_response = self.fight_monster(monster_code)
-            if not fight_response:
-                logger.error("Failed to fight monster")
-                return False
-            after_first_hp = self.character_service.get_hp_status()[0]
-            expected_next_hit = max_hp - after_first_hp
-            logger.debug(f"Expected next hit estimated as {expected_next_hit}")
-
-            # Recover after first fight in preparation for next one
-            if not self._heal_or_rest(expected_next_hit=expected_next_hit):
-                logger.error("Failed to recover after fight")
-                return False
-
-            # Subsequent fights
-            for attempt in range(2, count + 1):
+            required_hp = self._minimum_hp_to_fight(monster_code)
+            for attempt in range(1, count + 1):
                 logger.info(f"Fight attempt {attempt}/{count} for {monster_code}")
+                if not self._recover_to_hp(required_hp):
+                    logger.error("Failed to reach the required HP before fight")
+                    return False
+
                 fight_response = self.fight_monster(monster_code)
                 if not fight_response:
                     logger.error("Failed to fight monster")
@@ -493,11 +515,6 @@ class CombatService:
                         logger.error("Failed to rest after final fight")
                         return False
                     break
-
-                # Recover for next fight using expected_hit estimation
-                if not self._heal_or_rest(expected_next_hit=expected_next_hit):
-                    logger.error("Failed to recover after fight")
-                    return False
 
             logger.info(f"Successfully fought {monster_code} {count} time(s)")
             return True

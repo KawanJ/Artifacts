@@ -89,6 +89,13 @@ stats, each weapon's effects, resistance, and critical-strike chance, then
 equips the highest-damage available weapon. If combat data cannot be fetched,
 it logs a warning and continues with the current equipment.
 
+Before each fight, combat recovery estimates the turns needed to defeat the
+monster using the character's minimum damage per turn, then estimates worst-case
+incoming damage using the monster's maximum damage per turn. It uses available
+healing items that will not overflow HP and rests when needed to reach the
+resulting HP threshold. If the estimate exceeds maximum HP, it prepares at
+maximum HP.
+
 ## Combat Drop Farming
 
 When crafting requires a mob resource, the combat service looks up its source
