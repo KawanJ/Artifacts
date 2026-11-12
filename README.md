@@ -82,9 +82,9 @@ equip attempts fail, gathering continues without one.
 
 ## Combat Weapons
 
-Weapon codes and their order are maintained in `src/models/combat_weapons.py`;
-the strongest known weapons appear first. Before fighting, the combat service
-checks the character's inventory and equipped weapon, then equips the first
-listed weapon the character owns. Refresh and reorder this list when game
-weapon data changes. If no listed weapon is available or equip attempts fail,
-combat continues without changing equipment.
+Before fighting, the combat service reads the target monster's elemental
+resistances and fetches item data for weapons in the character's inventory and
+weapon slot. It estimates expected damage using the character's current combat
+stats, each weapon's effects, resistance, and critical-strike chance, then
+equips the highest-damage available weapon. If combat data cannot be fetched,
+it logs a warning and continues with the current equipment.

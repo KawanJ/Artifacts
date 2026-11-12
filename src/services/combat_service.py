@@ -1,16 +1,31 @@
 """Combat service for fighting monsters."""
 import logging
+import math
 import time
 from typing import Dict, Any
 
 from src.client.api_client import APIClient, APIError
-from src.models.combat_weapons import COMBAT_WEAPONS
 from src.models.monster_locations import get_monster_location
 from src.services.banking_service import BankingService
 from src.services.character_service import CharacterService
+from src.services.item_service import ItemService
 from src.services.movement_service import MovementService
 
 logger = logging.getLogger(__name__)
+
+ELEMENTS = ("fire", "earth", "water", "air")
+OFFENSIVE_STATS = (
+    "attack_fire",
+    "attack_earth",
+    "attack_water",
+    "attack_air",
+    "dmg",
+    "dmg_fire",
+    "dmg_earth",
+    "dmg_water",
+    "dmg_air",
+    "critical_strike",
+)
 
 
 class CombatService:
@@ -36,13 +51,70 @@ class CombatService:
         self.movement_service = MovementService(api_client, character_name)
         self.character_service = CharacterService(api_client, character_name)
         self.banking_service = BankingService(api_client, character_name)
+        self.item_service = ItemService(api_client)
 
-    def _equip_combat_weapon(self) -> bool:
-        """Equip the strongest owned weapon from the ordered weapon catalogue."""
+    @staticmethod
+    def _item_effects(item_data: Dict[str, Any]) -> Dict[str, float]:
+        """Return the numeric effects relevant to weapon damage calculations."""
+        effects: Dict[str, float] = {}
+        for effect in item_data.get("effects", []) or []:
+            if not isinstance(effect, dict):
+                continue
+            code = effect.get("code")
+            value = effect.get("value")
+            if code in OFFENSIVE_STATS and isinstance(value, (int, float)):
+                effects[code] = effects.get(code, 0) + float(value)
+        return effects
+
+    @staticmethod
+    def _round_damage(value: float) -> int:
+        """Round damage with the game's half-up rule."""
+        return math.floor(value + 0.5)
+
+    @classmethod
+    def _weapon_expected_damage(
+        cls,
+        character_data: Dict[str, Any],
+        current_weapon_effects: Dict[str, float],
+        candidate_effects: Dict[str, float],
+        monster_data: Dict[str, Any],
+    ) -> float:
+        """Estimate one-turn damage after replacing the currently equipped weapon."""
+        stats = {
+            stat: float(character_data.get(stat, 0) or 0)
+            - current_weapon_effects.get(stat, 0)
+            + candidate_effects.get(stat, 0)
+            for stat in OFFENSIVE_STATS
+        }
+        crit_chance = min(max(stats["critical_strike"], 0), 100) / 100
+        expected_damage = 0.0
+
+        for element in ELEMENTS:
+            attack = cls._round_damage(
+                stats[f"attack_{element}"]
+                * (1 + (stats["dmg"] + stats[f"dmg_{element}"]) / 100)
+            )
+            resistance = float(monster_data.get(f"res_{element}", 0) or 0)
+            damage = cls._round_damage(attack * (1 - resistance / 100))
+            critical_damage = cls._round_damage(damage * 1.5)
+            expected_damage += (
+                damage * (1 - crit_chance) + critical_damage * crit_chance
+            )
+
+        return expected_damage
+
+    def _equip_combat_weapon(self, monster_code: str) -> bool:
+        """Equip the owned weapon with the highest expected damage against a monster."""
         try:
             character_data = self.character_service.get_character_data()
+            monster_response = self.api_client.get(f"/monsters/{monster_code}")
         except Exception as e:
-            logger.warning(f"Could not determine an available combat weapon: {e}")
+            logger.warning(f"Could not load combat data for {monster_code}: {e}")
+            return False
+
+        monster_data = monster_response.get("data")
+        if not isinstance(monster_data, dict):
+            logger.warning(f"No monster data returned for {monster_code}; keeping current weapon.")
             return False
 
         inventory = character_data.get("inventory", []) or []
@@ -55,18 +127,58 @@ class CombatService:
         }
         equipped_code = character_data.get("weapon_slot")
         available_codes = inventory_codes | ({equipped_code} if equipped_code else set())
-        candidates = [
-            weapon_code
-            for weapon_code in COMBAT_WEAPONS
-            if weapon_code in available_codes
-        ]
+        weapon_data: Dict[str, Dict[str, Any]] = {}
+        try:
+            for item_code in available_codes:
+                item_data = self.item_service.get_item(item_code)
+                if not isinstance(item_data, dict):
+                    logger.warning(
+                        f"Item data for '{item_code}' is unavailable; keeping current weapon."
+                    )
+                    return False
+                if item_data.get("type") == "weapon":
+                    weapon_data[item_code] = item_data
+        except Exception as e:
+            logger.warning(f"Could not load owned weapon data: {e}")
+            return False
+
+        current_weapon = weapon_data.get(equipped_code, {})
+        current_weapon_effects = self._item_effects(current_weapon)
+        candidates = sorted(
+            [
+                (
+                    self._weapon_expected_damage(
+                        character_data,
+                        current_weapon_effects,
+                        self._item_effects(item_data),
+                        monster_data,
+                    ),
+                    weapon_code,
+                )
+                for weapon_code, item_data in weapon_data.items()
+            ],
+            reverse=True,
+        )
+
         if not candidates:
             logger.info("No owned combat weapon found; continuing without changing equipment.")
             return False
 
-        for weapon_code in candidates:
+        logger.info(
+            "Weapon damage estimates against %s: %s",
+            monster_code,
+            ", ".join(f"{code}={damage:.2f}" for damage, code in candidates),
+        )
+        if equipped_code and any(
+            damage == candidates[0][0] and code == equipped_code
+            for damage, code in candidates
+        ):
+            logger.info(f"Best available weapon '{equipped_code}' is already equipped.")
+            return True
+
+        for _, weapon_code in candidates:
             if weapon_code == equipped_code:
-                logger.info(f"Best available combat weapon '{weapon_code}' is already equipped.")
+                logger.info(f"Using currently equipped weapon '{weapon_code}' as fallback.")
                 return True
 
             logger.info(f"Equipping best available combat weapon '{weapon_code}'.")
@@ -155,7 +267,12 @@ class CombatService:
             logger.info("No drops required; skipping combat drop farming.")
             return True
 
-        if not self._equip_combat_weapon():
+        monster_code = monster_code or self.get_monster_code_for_drop(target_item_code)
+        if not monster_code:
+            logger.error(f"Cannot determine which monster drops '{target_item_code}'.")
+            return False
+
+        if not self._equip_combat_weapon(monster_code):
             logger.warning("Unable to equip combat weapon; continuing without a dedicated weapon.")
 
         if not self._move_to_monster(monster_code):
@@ -321,7 +438,7 @@ class CombatService:
 
         try:
             # Ensure combat gear is in place for fight loops
-            self._equip_combat_weapon()
+            self._equip_combat_weapon(monster_code)
 
             if not self._move_to_monster(monster_code):
                 return False
