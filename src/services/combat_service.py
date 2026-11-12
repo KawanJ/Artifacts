@@ -31,14 +31,6 @@ OFFENSIVE_STATS = (
 class CombatService:
     """Service for managing combat and monster fights."""
 
-    # Static mapping from mob-drop item codes to monster codes.
-    MOB_DROP_TO_MONSTER: Dict[str, str] = {
-        "raw_chicken": "chicken",
-        "feather": "chicken",
-        "yellow_slimeball": "yellow_slime",
-        # Extend this map as needed for your game content.
-    }
-
     def __init__(self, api_client: APIClient, character_name: str):
         """Initialize CombatService.
         
@@ -190,8 +182,23 @@ class CombatService:
         return False
 
     def get_monster_code_for_drop(self, drop_code: str) -> str | None:
-        """Get monster code for a mob drop item code using the mapping."""
-        return self.MOB_DROP_TO_MONSTER.get(drop_code)
+        """Get a monster code for an item by querying the API's drop filter."""
+        response = self.api_client.get("/monsters", params={"drop": drop_code})
+        monsters = response.get("data")
+        if not isinstance(monsters, list):
+            return None
+
+        for monster in monsters:
+            if not isinstance(monster, dict) or not isinstance(monster.get("code"), str):
+                continue
+            drops = monster.get("drops", [])
+            if isinstance(drops, list) and any(
+                isinstance(drop, dict) and drop.get("code") == drop_code
+                for drop in drops
+            ):
+                return monster["code"]
+
+        return None
 
     def _move_to_monster(self, monster_code: str) -> bool:
         # Get monster coordinates

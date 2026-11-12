@@ -88,3 +88,9 @@ weapon slot. It estimates expected damage using the character's current combat
 stats, each weapon's effects, resistance, and critical-strike chance, then
 equips the highest-damage available weapon. If combat data cannot be fetched,
 it logs a warning and continues with the current equipment.
+
+## Combat Drop Farming
+
+When crafting requires a mob resource, the combat service looks up its source
+monster through the API's monster drop filter instead of relying on a local
+item-to-monster mapping.
