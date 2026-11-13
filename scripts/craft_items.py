@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config.settings import settings
 from src.client.api_client import APIClient
-from src.services.crafting_service import CraftingService
+from scripts.bootstrap import build_services
 
 # Configure logging for GitHub Actions
 logging.basicConfig(
@@ -52,15 +52,20 @@ def main():
             max_retries=settings.max_retries,
             timeout=settings.request_timeout,
         ) as client:
-            # Initialize service
-            crafting_service = CraftingService(client, settings.character_name)
+            services = build_services(
+                client,
+                settings.character_name,
+                settings.combat_food_allowlist,
+                settings.combat_food_count,
+            )
 
             # Craft the item
-            success = crafting_service.craft_item(item_code, quantity=quantity)
+            success = services.crafting.craft_item(item_code, quantity=quantity)
             if success:
                 logger.info("✓ Item crafting completed successfully")
             else:
                 logger.warning("⚠ Item crafting may have failed")
+                return 1
         
         logger.info("Item crafting automation finished")
         return 0

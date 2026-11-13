@@ -1,4 +1,4 @@
-"""Health recovery service for combat workflows."""
+"""Health recovery service for combat runs."""
 import logging
 import time
 
@@ -17,12 +17,13 @@ class CombatRecoveryService:
         self,
         api_client: APIClient,
         character_name: str,
+        character_service: CharacterService,
         food_service: CombatFoodService,
         equipment_service: CombatEquipmentService,
     ):
         self.api_client = api_client
         self.character_name = character_name
-        self.character_service = CharacterService(api_client, character_name)
+        self.character_service = character_service
         self.food_service = food_service
         self.equipment_service = equipment_service
 
@@ -73,7 +74,7 @@ class CombatRecoveryService:
                     hp,
                     max_hp,
                 )
-                if not self.character_service.use_healing_item(code):
+                if not self.character_service.use_item(code):
                     logger.warning("Failed to use healing item; falling back to rest.")
                     healing_items[code] = (0, heal_amount)
                     continue

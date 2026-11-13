@@ -4,11 +4,11 @@ import time
 from typing import Any, Dict, Mapping, Optional
 
 from src.client.api_client import APIClient
-from src.models.crafting_locations import get_crafting_location
-from src.services.banking_service import BankingService
-from src.services.character_service import CharacterService
+from src.domain.world import get_crafting_location
 from src.services.combat.combat_service import CombatService
-from src.services.item_service import ItemService
+from src.services.character_service import CharacterService
+from src.services.inventory.inventory_cleanup_service import InventoryCleanupService
+from src.services.items.item_catalog_service import ItemCatalogService
 from src.services.movement_service import MovementService
 from src.services.resource_service import ResourceService
 
@@ -16,41 +16,28 @@ logger = logging.getLogger(__name__)
 
 
 class CraftingService:
-    """Service for managing crafting operations."""
+    """Resolve recipe inputs and coordinate gathering, combat, and crafting."""
 
-    def __init__(self, api_client: APIClient, character_name: str):
-        """Initialize CraftingService.
-        
-        Args:
-            api_client: API client instance.
-            character_name: Name of the character to control.
-        """
+    def __init__(
+        self,
+        movement_service: MovementService,
+        cleanup_service: InventoryCleanupService,
+        item_service: ItemCatalogService,
+        character_service: CharacterService,
+        resource_service: ResourceService,
+        combat_service: CombatService,
+        api_client: APIClient,
+        character_name: str,
+    ):
+        """Initialize the crafting service."""
+        self.movement_service = movement_service
+        self.cleanup_service = cleanup_service
+        self.item_service = item_service
+        self.character_service = character_service
+        self.resource_service = resource_service
+        self.combat_service = combat_service
         self.api_client = api_client
         self.character_name = character_name
-        self.movement_service = MovementService(api_client, character_name)
-        self.banking_service = BankingService(api_client, character_name)
-        self.item_service = ItemService(api_client)
-        self.resource_service = ResourceService(api_client, character_name)
-        self.character_service = CharacterService(api_client, character_name)
-        self.combat_service = CombatService(api_client, character_name)
-
-    def _craft_once(self, item_code: str, quantity: int = 1) -> bool:
-        """Perform a craft action for the given item code (optionally multiple at once)."""
-        logger.info(f"Crafting item: {item_code} x{quantity}")
-        response = self.api_client.post(
-            f"/my/{self.character_name}/action/crafting",
-            data={"code": item_code, "quantity": quantity},
-        )
-        logger.debug(f"Crafting result: {response}")
-
-        # Check for cooldown and wait if necessary
-        cooldown_data = response.get("data", {}).get("cooldown")
-        if cooldown_data and "total_seconds" in cooldown_data:
-            cooldown_seconds = cooldown_data["total_seconds"]
-            logger.info(f"Waiting {cooldown_seconds} seconds for crafting cooldown...")
-            time.sleep(cooldown_seconds)
-
-        return True
 
     def _gather_required_resources(
         self,
@@ -65,7 +52,7 @@ class CraftingService:
             item_data: Item metadata returned by the API.
             multiplier: How many times the item will be crafted.
             inventory: Current inventory map ({code: quantity}).
-            keep_items: Quantities reserved by the containing workflow.
+            keep_items: Quantities reserved by the current crafting operation.
 
         Returns:
             True if gathering succeeded, False otherwise.
@@ -135,7 +122,9 @@ class CraftingService:
                     logger.info(
                         f"Farming mob drop required resource: {required_code} x{required_quantity}"
                     )
-                    monster_code = self.combat_service.get_monster_code_for_drop(required_code)
+                    monster_code = self.combat_service.get_monster_code_for_drop(
+                        required_code
+                    )
                     if not monster_code:
                         logger.warning(
                             f"No direct monster mapping for mob drop {required_code}, trying fallback prefix logic"
@@ -209,7 +198,7 @@ class CraftingService:
         except Exception as e:
             logger.error(f"Failed to craft item {item_code}: {e}")
         keep_items = {item_code: quantity} if success else {}
-        if not self.banking_service.deposit_unneeded_items(keep_items):
+        if not self.cleanup_service.deposit_unneeded_items(keep_items):
             logger.error("Failed to deposit unneeded items after crafting.")
             return False
         return success
@@ -221,7 +210,7 @@ class CraftingService:
         inventory: Dict[str, int],
         inherited_keep_items: Mapping[str, int],
     ) -> bool:
-        """Craft one item recursively without ending the containing workflow."""
+        """Craft one item recursively without ending the containing operation."""
         item_data = self.item_service.get_item(item_code)
         if not item_data:
             logger.error(f"Failed to fetch item metadata for {item_code}")
@@ -261,4 +250,15 @@ class CraftingService:
             logger.error("Failed to move to crafting location")
             return False
 
-        return self._craft_once(item_code, quantity=quantity)
+        logger.info("Crafting item: %s x%s", item_code, quantity)
+        response = self.api_client.post(
+            f"/my/{self.character_name}/action/crafting",
+            data={"code": item_code, "quantity": quantity},
+        )
+        logger.debug("Crafting result: %s", response)
+        cooldown = response.get("data", {}).get("cooldown")
+        if cooldown and "total_seconds" in cooldown:
+            seconds = cooldown["total_seconds"]
+            logger.info("Waiting %s seconds for crafting cooldown...", seconds)
+            time.sleep(seconds)
+        return True

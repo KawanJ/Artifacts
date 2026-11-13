@@ -41,7 +41,7 @@ class APIClient:
             timeout: Request timeout in seconds.
         """
         self.api_key = api_key
-        self.base_url = base_url
+        self.base_url = base_url.rstrip("/")
         self.max_retries = max_retries
         self.timeout = timeout
         self.session = self._create_session()

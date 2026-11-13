@@ -11,14 +11,6 @@ logger = logging.getLogger(__name__)
 class CharacterService:
     """Service for interacting with character data."""
 
-    # Healing items mapping (code -> heal amount)
-    HEALING_ITEMS: Dict[str, int] = {
-        "apple": 50,
-        "cooked_gudgeon": 75,
-        "cooked_chicken": 80,
-        "fried_eggs": 150,
-    }
-
     def __init__(self, api_client: APIClient, character_name: str):
         """Initialize CharacterService.
 
@@ -47,7 +39,7 @@ class CharacterService:
     def get_skill_level(self, skill_name: str) -> int:
         """Return the current level for the given skill."""
         data = self.get_character_data()
-        level = data.get(f"{skill_name}_level", {}) or {}
+        level = data.get(f"{skill_name}_level", 0) or 0
         logger.debug(f"Skill '{skill_name}' level: {level}")
         return level
 
@@ -64,59 +56,40 @@ class CharacterService:
         logger.debug(f"Inventory summary: {result}")
         return result
 
-    def get_available_healing_items(self) -> Dict[str, tuple[int, int]]:
-        """Return available healing items (code -> (quantity, heal_amount))."""
-        inventory = self.get_inventory()
-        result: Dict[str, tuple[int, int]] = {}
-        for code, heal_amount in self.HEALING_ITEMS.items():
-            qty = inventory.get(code, 0)
-            if qty > 0:
-                result[code] = (qty, heal_amount)
-        logger.debug(f"Available healing items: {result}")
-        return result
-
-    def use_healing_item(self, item_code: str, quantity: int = 1) -> bool:
-        """Use a healing item via the API.
-
-        This assumes the API supports a healing item use endpoint; update as needed.
-        """
-        logger.info(f"Using healing item: {item_code} x{quantity}")
+    def use_item(self, item_code: str, quantity: int = 1) -> bool:
+        """Use an item via the character action endpoint."""
+        logger.info("Using item: %s x%s", item_code, quantity)
         try:
             response = self.api_client.post(
                 f"/my/{self.character_name}/action/use",
                 data={"code": item_code, "quantity": quantity},
             )
-            logger.debug(f"Use item response: {response}")
-
-            # Handle cooldown if provided
-            cooldown_data = response.get("data", {}).get("cooldown")
-            if cooldown_data and "total_seconds" in cooldown_data:
-                cooldown_seconds = cooldown_data["total_seconds"]
-                logger.info(f"Waiting {cooldown_seconds} seconds after using healing item...")
-                time.sleep(cooldown_seconds)
-
+            logger.debug("Use item response: %s", response)
+            self._wait_for_cooldown(response, "using item")
             return True
         except Exception as e:
-            logger.error(f"Failed to use healing item {item_code}: {e}")
+            logger.error("Failed to use item %s: %s", item_code, e)
             return False
 
     def equip_item(self, item_code: str, slot: str = "weapon") -> bool:
         """Equip an item in the specified slot."""
-        logger.info(f"Equipping item '{item_code}' into slot '{slot}'")
+        logger.info("Equipping item '%s' into slot '%s'", item_code, slot)
         try:
             response = self.api_client.post(
                 f"/my/{self.character_name}/action/equip",
                 data=[{"code": item_code, "slot": slot}],
             )
-            logger.debug(f"Equip response: {response}")
-
-            cooldown_data = response.get("data", {}).get("cooldown")
-            if cooldown_data and "total_seconds" in cooldown_data:
-                cooldown_seconds = cooldown_data["total_seconds"]
-                logger.info(f"Waiting {cooldown_seconds} seconds after equipping item...")
-                time.sleep(cooldown_seconds)
-
+            logger.debug("Equip response: %s", response)
+            self._wait_for_cooldown(response, "equipping item")
             return True
         except Exception as e:
-            logger.error(f"Failed to equip item {item_code}: {e}")
+            logger.error("Failed to equip item %s: %s", item_code, e)
             return False
+
+    @staticmethod
+    def _wait_for_cooldown(response: Dict[str, Any], action: str) -> None:
+        cooldown = response.get("data", {}).get("cooldown")
+        if cooldown and "total_seconds" in cooldown:
+            seconds = cooldown["total_seconds"]
+            logger.info("Waiting %s seconds after %s...", seconds, action)
+            time.sleep(seconds)

@@ -1,126 +1,201 @@
 # Artifacts MMO Automation
 
-Python scripts for automating tasks in Artifacts MMO game.
+Python automation for gathering resources, crafting items, fighting monsters, and
+leveling crafting skills in Artifacts MMO.
 
-## Repository Structure
+## Project structure
 
-```
-├── .github/workflows/          # GitHub Actions workflows
+```text
+├── .github/workflows/
+│   ├── craft_items.yml
+│   ├── fight_monsters.yml
+│   ├── gather_resources.yml
+│   ├── level_crafting_skills.yml
+│   └── tests.yml
+├── scripts/
+│   ├── bootstrap.py              # Shared construction of the service graph
+│   └── <automation entry points>
 ├── src/
-│   ├── client/                 # API client
-│   ├── services/               # Business logic services
-│   ├── models/                 # Data models and mappings
-│   └── config/                 # Configuration management
-├── scripts/                    # Executable scripts
-├── requirements.txt            # Python dependencies
-├── .env.example               # Environment configuration template
-└── README.md
+│   ├── client/                   # HTTP transport and API errors
+│   ├── config/                   # Runtime settings
+│   ├── domain/                   # Game data and pure calculations
+│   └── services/
+│       ├── combat/               # Fight, equipment, food, and recovery
+│       ├── inventory/            # Bank operations and inventory cleanup
+│       ├── items/                # Item lookup and recycling
+│       ├── character_service.py
+│       ├── crafting_service.py
+│       ├── movement_service.py
+│       └── resource_service.py
+└── tests/                        # Mirrors scripts/ and src/
 ```
 
-## Local Setup
+Each script is a thin entry point: it validates its inputs, creates the API
+client, builds shared services through `scripts/bootstrap.py`, and delegates
+the game actions to those services.
 
-### Prerequisites
-- Python 3.13+
-- Artifacts MMO API key
+## Services
 
-### Installation
-```bash
-# Clone repository
-git clone <repository-url>
-cd artifacts
+| Area | Responsibility |
+| --- | --- |
+| `client/` | Sends authenticated API requests and handles retries and API errors. |
+| `config/` | Loads and validates runtime settings, including API credentials and combat-food options. |
+| `domain/` | Holds local game reference data and calculations that do not perform API actions. |
+| `CharacterService` | Reads character state, inventory, and skills; equips and uses items. |
+| `MovementService` | Moves the character to resource, monster, bank, and crafting locations. |
+| `ResourceService` | Resolves gathering requirements, selects an available gathering tool, gathers resources, and handles a full-inventory retry. |
+| `CraftingService` | Resolves recipe requirements recursively, obtains missing resources or monster drops, travels to a crafting station, crafts, and cleans up inventory. |
+| `combat/CombatService` | Coordinates combat runs and monster-drop farming. `FightService` performs individual fights; `CombatEquipmentService` selects a weapon; `CombatRecoveryService` manages HP recovery; `CombatFoodService` provisions, replenishes, and returns food. |
+| `inventory/BankService` | Deposits and withdraws items through the bank. |
+| `inventory/InventoryCleanupService` | Deposits unneeded items while preserving reserved quantities, equipped items, weapons, and gathering tools. |
+| `items/ItemCatalogService` | Retrieves item metadata used by gathering, crafting, combat, and cleanup. |
+| `items/RecyclingService` | Recycles crafted items for crafting-skill experience. |
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+Gathering and combat attempt to free inventory space and retry once when an
+action fails because the inventory is full. End-of-run cleanup deposits
+unneeded items; crafting preserves the requested output and ingredients still
+needed for the recipe.
 
-# Install dependencies
-pip install -r requirements.txt
+## Automation workflows
 
-# Configure environment
-cp .env.example .env
-# Edit .env with your API key and character name
+All four game workflows are manually dispatched through GitHub Actions. They
+use the `ARTIFACTS_API_KEY` repository secret and pass their inputs to the
+corresponding script.
+
+| Workflow | Inputs | Script |
+| --- | --- | --- |
+| Gather Resources | `resource_code`, `amount` (default `1`) | `scripts/gather_resources.py` |
+| Craft Items | `item_code`, `quantity` (default `1`) | `scripts/craft_items.py` |
+| Fight Monsters | `monster_code`, `times` (default `1`) | `scripts/fight_monsters.py` |
+| Level crafting skills | `skill`, `item_code` | `scripts/level_crafting_skills.py` |
+
+### Gather resources
+
+The resource service finds the resource location and gathering subtype, equips
+the strongest applicable owned tool from the local tool catalogue when
+available, then gathers the requested amount. If an action encounters a full
+inventory, it deposits unneeded items, returns to the resource, and retries
+that action once. Final cleanup deposits unneeded inventory.
+
+```mermaid
+flowchart TD
+    A["Dispatch: resource_code, amount"] --> B["Validate settings and inputs"]
+    B --> C["Build services; resolve resource and location"]
+    C --> D["Select and equip an applicable owned tool, if available"]
+    D --> E["Gather one unit"]
+    E --> F{"Gather succeeded?"}
+    F -- "Yes" --> G{"Requested amount complete?"}
+    G -- "No" --> E
+    G -- "Yes" --> K["Deposit unneeded inventory"]
+    F -- "Inventory full" --> H["Deposit unneeded items"]
+    H --> I["Return to resource and retry once"]
+    I --> J{"Retry succeeded?"}
+    J -- "Yes" --> G
+    J -- "No" --> K
+    F -- "Other failure" --> K
 ```
 
-## Local Usage
+### Craft items
 
-### Environment Setup
-```bash
-export ARTIFACTS_API_KEY=your_api_key_here
-export ARTIFACTS_CHARACTER_NAME=your_character_name
+The crafting service checks the recipe and recursively resolves its
+requirements. It uses available inventory first; missing ingredients are
+gathered, crafted as prerequisites, or farmed from a monster as appropriate.
+After crafting at the required station, cleanup keeps the requested output and
+deposits incidental drops and leftover materials. Ingredients are protected
+while they are still needed by later recipe steps.
+
+```mermaid
+flowchart TD
+    A["Dispatch: item_code, quantity"] --> B["Validate settings and inputs"]
+    B --> C["Load recipe and resolve requirements recursively"]
+    C --> D{"Required ingredient available?"}
+    D -- "Yes" --> H["Reserve ingredient"]
+    D -- "No" --> E{"Craftable prerequisite?"}
+    E -- "Yes" --> F["Craft prerequisite; continue resolving"]
+    F --> D
+    E -- "No" --> G{"Monster drop required?"}
+    G -- "Yes" --> I["Combat service farms the required drop"]
+    G -- "No" --> J["Resource service gathers the ingredient"]
+    I --> D
+    J --> D
+    H --> K{"All recipe inputs resolved?"}
+    K -- "No" --> D
+    K -- "Yes" --> L["Move to crafting station"]
+    L --> M["Craft requested quantity"]
+    M --> N["Clean up; preserve requested output"]
 ```
 
-### Run Scripts
-```bash
-# Gather resources
-python scripts/gather_resources.py copper_ore 5
+### Fight monsters
 
-# Fight monsters (use the monster code)
-python scripts/fight_monsters.py chicken
+Before fighting, combat provisions allowlisted healing food from the bank and
+tries to fish and cook an eligible allowlisted meal to cover a shortfall. It
+then equips its best available weapon, travels to the monster, and estimates a
+safe HP threshold. Before each fight, recovery uses healing items only when
+they will not exceed maximum HP, and rests when needed. When no healing food
+remains during recovery, combat attempts to replenish it and return to the
+current fight location; resting remains the fallback if more food cannot be
+obtained. At the end, it rests, returns unused run-provisioned food, and cleans
+up unneeded inventory.
 
-# Craft items
-python scripts/craft_items.py wooden_staff
+```mermaid
+flowchart TD
+    A["Dispatch: monster_code, times"] --> B["Validate settings and inputs"]
+    B --> C["Prepare allowlisted food; withdraw from bank"]
+    C --> D{"Food shortfall?"}
+    D -- "Yes" --> E["Fish and cook the best eligible allowlisted food"]
+    D -- "No" --> F["Equip best weapon and travel to monster"]
+    E --> F
+    F --> G["Estimate HP threshold"]
+    G --> H["Check HP and available healing items"]
+    H --> I{"HP threshold reached?"}
+    I -- "Yes" --> N["Fight monster"]
+    I -- "No" --> J{"Non-overflowing food available?"}
+    J -- "Yes" --> K["Use one food item"]
+    K --> H
+    J -- "No; food depleted" --> L["Try to replenish food; return to fight location"]
+    L --> M{"Food replenished?"}
+    M -- "Yes" --> H
+    M -- "No" --> REST["Rest to recover"]
+    J -- "No suitable food" --> REST
+    REST --> AFTER_REST{"HP increased?"}
+    AFTER_REST -- "Yes" --> H
+    AFTER_REST -- "No" --> O["Stop with failure"]
+    N --> T{"Fight action succeeded?"}
+    T -- "Yes" --> P{"More fights?"}
+    T -- "Inventory full" --> U["Deposit unneeded items; return to monster"]
+    U --> V["Retry fight once"]
+    V --> W{"Retry succeeded?"}
+    W -- "Yes" --> P
+    W -- "No" --> O
+    T -- "Other failure" --> O
+    P -- "Yes" --> H
+    P -- "No" --> Q["Rest after final fight"]
+    Q --> LEFTOVERS["Return unused run-provisioned food"]
+    LEFTOVERS --> CLEANUP["Deposit unneeded inventory"]
 ```
 
-## File Overview
+Combat food is restricted to `COMBAT_FOOD_ALLOWLIST`; `COMBAT_FOOD_COUNT`
+controls the target provision and can be set to `0` to disable provisioning.
+If food cannot be obtained, recovery can still use resting.
 
-- **scripts/**: Entry points for different automation tasks
-- **src/client/**: HTTP client for API communication
-- **src/services/**: Game logic (combat, gathering, crafting, movement)
-- **src/models/**: Data structures and location mappings
-- **src/config/**: Environment variable management
-- **.github/workflows/**: GitHub Actions for remote execution
+### Level crafting skills
 
-## Gathering Tools
+This workflow records the starting level of the selected crafting skill, then
+repeats a single-item craft and recycle cycle until the skill level increases.
+Crafting or recycling failure stops the run.
 
-Gathering tool codes and their bonuses are maintained locally in
-`src/models/gathering_tools.py`; the automation does not fetch tool catalogue
-data from the API. At the start of each game season, refresh this table from
-the current item data. The resource's gathering subtype is still read from its
-item metadata, and the character inventory/equipment is checked to select the
-strongest listed tool the character owns. If no listed tool is available or
-equip attempts fail, gathering continues without one.
-
-## Combat Weapons
-
-Before fighting, the combat service reads the target monster's elemental
-resistances and fetches item data for weapons in the character's inventory and
-weapon slot. It estimates expected damage using the character's current combat
-stats, each weapon's effects, resistance, and critical-strike chance, then
-equips the highest-damage available weapon. If combat data cannot be fetched,
-it logs a warning and continues with the current equipment.
-
-Before each fight, combat recovery estimates the turns needed to defeat the
-monster using the character's minimum damage per turn, then estimates worst-case
-incoming damage using the monster's maximum damage per turn. It uses available
-healing items that will not overflow HP and rests when needed to reach the
-resulting HP threshold. If the estimate exceeds maximum HP, it prepares at
-maximum HP.
-
-Combat runs provision up to 25 healing items from the bank before fighting and
-return unused provisioned food afterward. Only item codes in
-`COMBAT_FOOD_ALLOWLIST` are withdrawn or used; its default is
-`cooked_gudgeon,cooked_shrimp,cooked_trout,cooked_bass,cooked_salmon,cooked_swordfish`.
-If the bank cannot provide the requested amount, the service fishes and cooks
-the best allowlisted fish meal supported by the character's fishing and cooking
-levels. During a multi-fight loop, if all allowlisted food is consumed, the
-service tops up supplies between fights and returns to the fight location;
-resting remains the fallback if more food cannot be obtained. Set
-`COMBAT_FOOD_COUNT` to change the target, or set it to `0` to disable
-provisioning.
-
-## Inventory cleanup
-
-Gathering and combat workflows deposit unneeded inventory items when they
-finish. Crafting keeps the ingredients still needed by the recipe and the
-requested crafted output, and deposits incidental drops and surplus
-ingredients. Equipped items, recognized weapons, and listed gathering tools
-are protected from deposits. When gathering or fighting encounters a full
-inventory, the workflow first attempts to deposit unneeded items and retries
-the action once. Bank capacity and cases where the inventory remains full are
-not handled automatically.
-
-## Combat Drop Farming
-
-When crafting requires a mob resource, the combat service looks up its source
-monster through the API's monster drop filter instead of relying on a local
-item-to-monster mapping.
+```mermaid
+flowchart TD
+    A["Dispatch: skill, item_code"] --> B["Validate settings and inputs"]
+    B --> C["Record starting skill level"]
+    C --> D["Craft one item"]
+    D --> E{"Craft succeeded?"}
+    E -- "No" --> H["Stop with failure"]
+    E -- "Yes" --> F["Recycle the item"]
+    F --> G{"Recycling succeeded?"}
+    G -- "No" --> H
+    G -- "Yes" --> I["Read current skill level"]
+    I --> J{"Level higher than starting level?"}
+    J -- "No" --> D
+    J -- "Yes" --> K["Stop successfully"]
+```
