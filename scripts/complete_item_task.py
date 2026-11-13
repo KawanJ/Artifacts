@@ -23,6 +23,9 @@ def main() -> int:
     logger.info("Starting item task automation...")
     try:
         settings.validate()
+        character_name = (
+            os.getenv("ITEM_TASK_CHARACTER_NAME") or settings.character_name
+        )
         with APIClient(
             api_key=settings.api_key,
             base_url=settings.api_base_url,
@@ -31,7 +34,7 @@ def main() -> int:
         ) as client:
             services = build_services(
                 client,
-                settings.character_name,
+                character_name,
                 settings.combat_food_allowlist,
                 settings.combat_food_count,
             )

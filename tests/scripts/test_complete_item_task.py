@@ -14,6 +14,36 @@ class CompleteItemTaskScriptTests(ScriptTestCase):
         self.assertEqual(self.api.completed_tasks, 1)
         self.assertEqual(self.api.bank.get("tasks_coin"), 2)
 
+    def test_character_name_input_overrides_configured_character(self):
+        with patch.object(
+            complete_item_task,
+            "build_services",
+            wraps=complete_item_task.build_services,
+        ) as build_services:
+            result = self.run_script(
+                complete_item_task,
+                [],
+                {"ITEM_TASK_CHARACTER_NAME": "AnotherCharacter"},
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(build_services.call_args.args[1], "AnotherCharacter")
+
+    def test_blank_character_name_uses_configured_character(self):
+        with patch.object(
+            complete_item_task,
+            "build_services",
+            wraps=complete_item_task.build_services,
+        ) as build_services:
+            result = self.run_script(
+                complete_item_task,
+                [],
+                {"ITEM_TASK_CHARACTER_NAME": ""},
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(build_services.call_args.args[1], "tester")
+
     def test_configuration_and_service_failures_return_nonzero_status(self):
         with patch.object(settings, "validate", side_effect=ValueError("bad config")):
             self.assertEqual(self.run_script(complete_item_task, []), 1)

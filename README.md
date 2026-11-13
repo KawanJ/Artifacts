@@ -71,19 +71,20 @@ corresponding script.
 | Craft Items | `item_code`, `quantity` (default `1`) | `scripts/craft_items.py` |
 | Fight Monsters | `monster_code`, `times` (default `1`) | `scripts/fight_monsters.py` |
 | Level crafting skills | `skill`, `item_code` | `scripts/level_crafting_skills.py` |
-| Complete Item Task | None; resumes an active item task or accepts one | `scripts/complete_item_task.py` |
+| Complete Item Task | `character_name` (optional; defaults to the configured character); resumes an active item task or accepts one | `scripts/complete_item_task.py` |
 
 ### Complete an item task
 
-The workflow starts at the hardcoded Items Tasks Master location, resumes an
-active item task or accepts one when no task is active, and produces its target
-in inventory-safe batches. Raw resources are gathered until inventory capacity
-is reached; craftable tasks estimate their base ingredients to choose a
-capacity-safe batch. After each batch, it trades the deliverable and refreshes
-server task progress. On completion, normal cleanup banks unneeded reward
-items such as task coins. Gold remains character currency. It assumes the
-target item is not already in inventory or the bank and that the inventory has
-no unnecessary items when the workflow starts.
+The workflow accepts an optional character name; when omitted, it uses the
+configured character. It starts at the hardcoded Items Tasks Master location,
+resumes an active item task or accepts one when no task is active, and produces
+its target in inventory-safe batches. Raw resources are gathered until
+inventory capacity is reached; craftable tasks estimate their base ingredients
+to choose a capacity-safe batch. After each batch, it trades the deliverable
+and refreshes server task progress. On completion, normal cleanup banks
+unneeded reward items such as task coins. Gold remains character currency. It
+assumes the target item is not already in inventory or the bank and that the
+inventory has no unnecessary items when the workflow starts.
 
 ```mermaid
 flowchart TD

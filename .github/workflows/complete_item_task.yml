@@ -2,6 +2,11 @@ name: Complete Item Task
 
 on:
   workflow_dispatch:
+    inputs:
+      character_name:
+        description: 'Character to run the item task as (defaults to the configured character)'
+        required: false
+        type: string
 
 jobs:
   complete-item-task:
@@ -23,4 +28,5 @@ jobs:
       - name: Run item task
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
+          ITEM_TASK_CHARACTER_NAME: ${{ inputs.character_name }}
         run: python scripts/complete_item_task.py
