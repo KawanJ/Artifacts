@@ -1,7 +1,7 @@
 """Combat API actions and inventory-full retry handling."""
 import logging
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from src.client.api_client import APIClient, APIError
 from src.models.monster_locations import get_monster_location
@@ -39,6 +39,7 @@ class CombatActionService:
         self,
         monster_code: str,
         allow_retry: bool = True,
+        keep_items: Mapping[str, int] | None = None,
     ) -> Dict[str, Any] | None:
         """Perform one fight, retrying once after depositing items if inventory is full."""
         logger.info("Starting fight...")
@@ -64,16 +65,20 @@ class CombatActionService:
         except APIError as e:
             if allow_retry and e.status_code == 497:
                 logger.warning(
-                    "Inventory full during fight; depositing common items and retrying..."
+                    "Inventory full during fight; depositing unneeded items and retrying..."
                 )
-                if not self.banking_service.deposit_common_items():
-                    logger.error("Failed to deposit common items; aborting fight.")
+                if not self.banking_service.deposit_unneeded_items(keep_items):
+                    logger.error("Failed to deposit unneeded items; aborting fight.")
                     return None
 
                 if not self.move_to_monster(monster_code):
                     return None
 
-                return self.fight_once(monster_code, allow_retry=False)
+                return self.fight_once(
+                    monster_code,
+                    keep_items=keep_items,
+                    allow_retry=False,
+                )
 
             logger.error("Failed to fight monster: %s", e)
             return None

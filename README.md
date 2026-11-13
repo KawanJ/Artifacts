@@ -106,8 +106,18 @@ levels. During a multi-fight loop, if all allowlisted food is consumed, the
 service tops up supplies between fights and returns to the fight location;
 resting remains the fallback if more food cannot be obtained. Set
 `COMBAT_FOOD_COUNT` to change the target, or set it to `0` to disable
-provisioning. Food already in inventory before a combat run is not deposited
-back as part of cleanup.
+provisioning.
+
+## Inventory cleanup
+
+Gathering and combat workflows deposit unneeded inventory items when they
+finish. Crafting keeps the ingredients still needed by the recipe and the
+requested crafted output, and deposits incidental drops and surplus
+ingredients. Equipped items, recognized weapons, and listed gathering tools
+are protected from deposits. When gathering or fighting encounters a full
+inventory, the workflow first attempts to deposit unneeded items and retries
+the action once. Bank capacity and cases where the inventory remains full are
+not handled automatically.
 
 ## Combat Drop Farming
 

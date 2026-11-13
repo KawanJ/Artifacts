@@ -1,10 +1,11 @@
 """Crafting service for item crafting."""
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from src.client.api_client import APIClient
 from src.models.crafting_locations import get_crafting_location
+from src.services.banking_service import BankingService
 from src.services.character_service import CharacterService
 from src.services.combat.combat_service import CombatService
 from src.services.item_service import ItemService
@@ -27,6 +28,7 @@ class CraftingService:
         self.api_client = api_client
         self.character_name = character_name
         self.movement_service = MovementService(api_client, character_name)
+        self.banking_service = BankingService(api_client, character_name)
         self.item_service = ItemService(api_client)
         self.resource_service = ResourceService(api_client, character_name)
         self.character_service = CharacterService(api_client, character_name)
@@ -55,6 +57,7 @@ class CraftingService:
         item_data: Dict[str, Any],
         multiplier: int = 1,
         inventory: Optional[Dict[str, int]] = None,
+        keep_items: Mapping[str, int] | None = None,
     ) -> bool:
         """Gather all base resources required by an item (recursively).
 
@@ -62,6 +65,7 @@ class CraftingService:
             item_data: Item metadata returned by the API.
             multiplier: How many times the item will be crafted.
             inventory: Current inventory map ({code: quantity}).
+            keep_items: Quantities reserved by the containing workflow.
 
         Returns:
             True if gathering succeeded, False otherwise.
@@ -79,6 +83,7 @@ class CraftingService:
 
             if not required_code or required_quantity <= 0:
                 continue
+            total_required_quantity = required_quantity
 
             # First use anything already in inventory
             available = inventory.get(required_code, 0)
@@ -109,8 +114,19 @@ class CraftingService:
 
             # If this item itself can be crafted, recurse
             if required_item.get("craft"):
-                if not self.craft_item(required_code, required_quantity, inventory=inventory):
+                if not self._craft_item(
+                    required_code,
+                    required_quantity,
+                    inventory,
+                    keep_items or {},
+                ):
                     return False
+                available_after = self.character_service.get_inventory().get(
+                    required_code, 0
+                )
+                inventory[required_code] = max(
+                    0, available_after - total_required_quantity
+                )
                 continue
 
             # If it's a resource, gather it
@@ -125,15 +141,36 @@ class CraftingService:
                             f"No direct monster mapping for mob drop {required_code}, trying fallback prefix logic"
                         )
 
-                    if not self.combat_service.farm_drops(required_code, required_quantity, monster_code=monster_code):
+                    if not self.combat_service.farm_drops(
+                        required_code,
+                        required_quantity,
+                        monster_code=monster_code,
+                        keep_items=keep_items,
+                    ):
                         return False
+                    available_after = self.character_service.get_inventory().get(
+                        required_code, 0
+                    )
+                    inventory[required_code] = max(
+                        0, available_after - total_required_quantity
+                    )
                     continue
                 else:
                     logger.info(
                         f"Gathering required resource: {required_code} x{required_quantity}"
                     )
-                    if not self.resource_service.gather_resource(required_code, required_quantity):
+                    if not self.resource_service.gather_resource(
+                        required_code,
+                        required_quantity,
+                        keep_items=keep_items,
+                    ):
                         return False
+                    available_after = self.character_service.get_inventory().get(
+                        required_code, 0
+                    )
+                    inventory[required_code] = max(
+                        0, available_after - total_required_quantity
+                    )
                     continue
 
             # Unknown item type; log and continue
@@ -164,43 +201,64 @@ class CraftingService:
         Returns:
             True if successful, False otherwise.
         """
+        success = False
         try:
-            item_data = self.item_service.get_item(item_code)
-            if not item_data:
-                logger.error(f"Failed to fetch item metadata for {item_code}")
-                return False
-
-            craft_info = item_data.get("craft")
-            if not craft_info:
-                logger.error(f"Item {item_code} is not craftable")
-                return False
-
-            # Build inventory lookup once (only for subcrafting / ingredient resolution)
             if inventory is None:
                 inventory = self.character_service.get_inventory()
-
-            # Gather/craft all required inputs
-            if not self._gather_required_resources(item_data, multiplier=quantity, inventory=inventory):
-                return False
-
-            # Move to crafting location based on skill
-            skill = craft_info.get("skill")
-            try:
-                x, y = get_crafting_location(skill)
-            except ValueError as e:
-                logger.error(e)
-                return False
-
-            if not self.movement_service.move_to_location(x, y):
-                logger.error("Failed to move to crafting location")
-                return False
-
-            # Craft the item the requested number of times (API supports bulk quantity)
-            if not self._craft_once(item_code, quantity=quantity):
-                return False
-
-            return True
-
+            success = self._craft_item(item_code, quantity, inventory, {})
         except Exception as e:
             logger.error(f"Failed to craft item {item_code}: {e}")
+        keep_items = {item_code: quantity} if success else {}
+        if not self.banking_service.deposit_unneeded_items(keep_items):
+            logger.error("Failed to deposit unneeded items after crafting.")
             return False
+        return success
+
+    def _craft_item(
+        self,
+        item_code: str,
+        quantity: int,
+        inventory: Dict[str, int],
+        inherited_keep_items: Mapping[str, int],
+    ) -> bool:
+        """Craft one item recursively without ending the containing workflow."""
+        item_data = self.item_service.get_item(item_code)
+        if not item_data:
+            logger.error(f"Failed to fetch item metadata for {item_code}")
+            return False
+
+        craft_info = item_data.get("craft")
+        if not craft_info:
+            logger.error(f"Item {item_code} is not craftable")
+            return False
+
+        recipe_items = craft_info.get("items", [])
+        recipe_keep_items: Dict[str, int] = dict(inherited_keep_items)
+        for required in recipe_items:
+            required_code = required.get("code")
+            required_quantity = required.get("quantity", 0) * quantity
+            if required_code and required_quantity > 0:
+                recipe_keep_items[required_code] = (
+                    recipe_keep_items.get(required_code, 0) + required_quantity
+                )
+
+        if not self._gather_required_resources(
+            item_data,
+            multiplier=quantity,
+            inventory=inventory,
+            keep_items=recipe_keep_items,
+        ):
+            return False
+
+        skill = craft_info.get("skill")
+        try:
+            x, y = get_crafting_location(skill)
+        except ValueError as e:
+            logger.error(e)
+            return False
+
+        if not self.movement_service.move_to_location(x, y):
+            logger.error("Failed to move to crafting location")
+            return False
+
+        return self._craft_once(item_code, quantity=quantity)

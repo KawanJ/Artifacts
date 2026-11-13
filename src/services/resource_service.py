@@ -1,6 +1,8 @@
 """Resource gathering service."""
 import logging
 import time
+from typing import Mapping
+
 from src.client.api_client import APIClient, APIError
 from src.services.banking_service import BankingService
 from src.services.character_service import CharacterService
@@ -88,7 +90,13 @@ class ResourceService:
 
         logger.warning("No available gathering tool could be equipped; continuing without one.")
 
-    def _gather_once(self, resource_code: str, attempt: int, allow_retry: bool = True) -> bool:
+    def _gather_once(
+        self,
+        resource_code: str,
+        attempt: int,
+        keep_items: Mapping[str, int],
+        allow_retry: bool = True,
+    ) -> bool:
         """Attempt a single gather action, optionally retrying after banking if inventory is full."""
         try:
             response = self.api_client.post(
@@ -106,17 +114,23 @@ class ResourceService:
             return True
 
         except APIError as e:
-            # On inventory full, deposit the gathered item and retry once
             if allow_retry and e.status_code == 497:
-                logger.warning("Inventory is full; depositing gathered item to bank and retrying...")
-                if not self.banking_service.deposit_item(resource_code):
-                    logger.error("Failed to deposit item to bank; aborting gather.")
+                logger.warning(
+                    "Inventory is full; depositing unneeded items and retrying..."
+                )
+                if not self.banking_service.deposit_unneeded_items(keep_items):
+                    logger.error("Failed to deposit unneeded items; aborting gather.")
                     return False
                 
                 if not self._move_to_resource(resource_code):
                     return False
 
-                return self._gather_once(resource_code, attempt, allow_retry=False)
+                return self._gather_once(
+                    resource_code,
+                    attempt,
+                    keep_items,
+                    allow_retry=False,
+                )
 
             logger.error(f"Failed to gather on attempt {attempt}: {e}")
             return False
@@ -125,16 +139,40 @@ class ResourceService:
             logger.error(f"Failed to gather on attempt {attempt}: {e}")
             return False
 
-    def gather_resource(self, resource_code: str, amount: int = 1) -> bool:
+    def gather_resource(
+        self,
+        resource_code: str,
+        amount: int = 1,
+        keep_items: Mapping[str, int] | None = None,
+    ) -> bool:
         """Gather a specific resource multiple times.
 
         Args:
             resource_code: Code of the resource to gather.
             amount: Number of times to gather.
+            keep_items: Quantities reserved by the containing workflow.
 
         Returns:
             True if successful, False otherwise.
         """
+        keep_items = keep_items or {}
+        success = False
+        try:
+            success = self._gather_resource(resource_code, amount, keep_items)
+        except Exception as e:
+            logger.error("Unexpected error gathering resource: %s", e, exc_info=True)
+
+        if not self.banking_service.deposit_unneeded_items(keep_items):
+            logger.error("Failed to deposit unneeded items after gathering.")
+            return False
+        return success
+
+    def _gather_resource(
+        self,
+        resource_code: str,
+        amount: int,
+        keep_items: Mapping[str, int],
+    ) -> bool:
         logger.info(f"Gathering {resource_code} {amount} times...")
 
         try:
@@ -154,7 +192,7 @@ class ResourceService:
             # Gather the specified amount of times
             for i in range(amount):
                 logger.info(f"Gathering attempt {i + 1}/{amount}...")
-                if not self._gather_once(resource_code, i + 1):
+                if not self._gather_once(resource_code, i + 1, keep_items):
                     return False
 
             logger.info(f"Successfully gathered {resource_code} {amount} times")
