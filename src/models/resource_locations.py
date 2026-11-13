@@ -9,6 +9,11 @@ RESOURCE_LOCATIONS: Dict[str, Tuple[int, int]] = {
     "ash_wood": (-1, 0),
     "spruce_wood": (2, 6),
     "gudgeon": (4, 2),
+    "shrimp": (5, 2),
+    "trout": (7, 12),
+    "bass": (6, 12),
+    "salmon": (-3, -4),
+    "swordfish": (-4, 19),
     "sunflower": (2, 2),
 }
 

@@ -96,6 +96,19 @@ healing items that will not overflow HP and rests when needed to reach the
 resulting HP threshold. If the estimate exceeds maximum HP, it prepares at
 maximum HP.
 
+Combat runs provision up to 25 healing items from the bank before fighting and
+return unused provisioned food afterward. Only item codes in
+`COMBAT_FOOD_ALLOWLIST` are withdrawn or used; its default is
+`cooked_gudgeon,cooked_shrimp,cooked_trout,cooked_bass,cooked_salmon,cooked_swordfish`.
+If the bank cannot provide the requested amount, the service fishes and cooks
+the best allowlisted fish meal supported by the character's fishing and cooking
+levels. During a multi-fight loop, if all allowlisted food is consumed, the
+service tops up supplies between fights and returns to the fight location;
+resting remains the fallback if more food cannot be obtained. Set
+`COMBAT_FOOD_COUNT` to change the target, or set it to `0` to disable
+provisioning. Food already in inventory before a combat run is not deposited
+back as part of cleanup.
+
 ## Combat Drop Farming
 
 When crafting requires a mob resource, the combat service looks up its source

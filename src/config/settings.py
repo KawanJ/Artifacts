@@ -25,6 +25,18 @@ class Settings:
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
         self.max_retries = int(os.getenv("MAX_RETRIES", "3"))
         self.request_timeout = int(os.getenv("REQUEST_TIMEOUT", "30"))
+        self.combat_food_allowlist = tuple(
+            dict.fromkeys(
+                code.strip()
+                for code in os.getenv(
+                    "COMBAT_FOOD_ALLOWLIST",
+                    "cooked_chicken,cooked_gudgeon,cooked_shrimp,cooked_trout,cooked_bass,"
+                    "cooked_salmon,cooked_swordfish",
+                ).split(",")
+                if code.strip()
+            )
+        )
+        self.combat_food_count = int(os.getenv("COMBAT_FOOD_COUNT", "25"))
 
     def validate(self) -> None:
         """Validate that all required settings are present.
@@ -37,6 +49,8 @@ class Settings:
                 "ARTIFACTS_API_KEY environment variable not set. "
                 "Please configure it in GitHub Secrets."
             )
+        if self.combat_food_count < 0:
+            raise ValueError("COMBAT_FOOD_COUNT must not be negative.")
 
     def __repr__(self) -> str:
         """String representation of settings."""

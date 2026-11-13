@@ -2,12 +2,14 @@
 import logging
 import math
 import time
-from typing import Dict, Any
+from typing import Any, Callable, Dict
 
 from src.client.api_client import APIClient, APIError
+from src.config.settings import settings
 from src.models.monster_locations import get_monster_location
 from src.services.banking_service import BankingService
 from src.services.character_service import CharacterService
+from src.services.combat_food_service import CombatFoodService
 from src.services.item_service import ItemService
 from src.services.movement_service import MovementService
 
@@ -44,6 +46,12 @@ class CombatService:
         self.character_service = CharacterService(api_client, character_name)
         self.banking_service = BankingService(api_client, character_name)
         self.item_service = ItemService(api_client)
+        self.food_service = CombatFoodService(
+            api_client,
+            character_name,
+            settings.combat_food_allowlist,
+            settings.combat_food_count,
+        )
 
     @staticmethod
     def _item_effects(item_data: Dict[str, Any]) -> Dict[str, float]:
@@ -339,6 +347,17 @@ class CombatService:
         return self._fight_once(monster_code)
 
     def farm_drops(self, target_item_code: str, target_quantity: int, monster_code: str | None = None) -> bool:
+        """Provision food, farm drops, then return unused run-provisioned food."""
+        if target_quantity <= 0:
+            logger.info("No drops required; skipping combat drop farming.")
+            return True
+        return self._run_with_food(
+            lambda: self._farm_drops(target_item_code, target_quantity, monster_code)
+        )
+
+    def _farm_drops(
+        self, target_item_code: str, target_quantity: int, monster_code: str | None = None
+    ) -> bool:
         """Fight monsters until required drop quantity is achieved.
 
         Args:
@@ -349,10 +368,6 @@ class CombatService:
         Returns:
             True if target quantity reached, False otherwise.
         """
-        if target_quantity <= 0:
-            logger.info("No drops required; skipping combat drop farming.")
-            return True
-
         monster_code = monster_code or self.get_monster_code_for_drop(target_item_code)
         if not monster_code:
             logger.error(f"Cannot determine which monster drops '{target_item_code}'.")
@@ -370,7 +385,7 @@ class CombatService:
         while collected < target_quantity:
             attempts += 1
             logger.info(f"Combat drop farm attempt {attempts}: collected {collected}/{target_quantity} {target_item_code}")
-            if not self._recover_to_hp(required_hp):
+            if not self._recover_to_hp(required_hp, monster_code):
                 logger.error("Failed to reach the required HP before farming fight")
                 return False
 
@@ -395,7 +410,9 @@ class CombatService:
 
             # if no relevant drops but fight succeeded, continue
             if collected >= target_quantity:
-                self.rest()
+                if not self.rest():
+                    logger.error("Failed to rest after the final drop-farming fight")
+                    return False
                 logger.info(f"Target drop quantity reached: {collected}/{target_quantity}")
                 return True
 
@@ -427,7 +444,7 @@ class CombatService:
             logger.error(f"Failed to rest: {e}")
             return False
 
-    def _recover_to_hp(self, target_hp: int) -> bool:
+    def _recover_to_hp(self, target_hp: int, monster_code: str | None = None) -> bool:
         """Recover to a target HP using non-overflowing healing items before resting.
 
         Args:
@@ -442,7 +459,8 @@ class CombatService:
             logger.debug("HP is already at the required fight threshold.")
             return True
 
-        healing_items = self.character_service.get_available_healing_items()
+        healing_items = self.food_service.get_available_healing_items()
+        refill_attempted = False
         while hp < target_hp:
             missing_hp = max_hp - hp
             usable_items = [
@@ -463,9 +481,25 @@ class CombatService:
                     logger.warning("Failed to use healing item; falling back to rest.")
                     healing_items[code] = (0, heal_amount)
                     continue
+                self.food_service.record_food_used(code)
                 healing_items[code] = (qty - 1, heal_amount)
                 hp, max_hp = self.character_service.get_hp_status()
                 continue
+
+            if (
+                not refill_attempted
+                and not any(quantity > 0 for quantity, _ in healing_items.values())
+            ):
+                refill_attempted = True
+                if self.food_service.replenish_food():
+                    if monster_code and not self._equip_combat_weapon(monster_code):
+                        logger.warning(
+                            "Could not re-equip a combat weapon after food replenishment."
+                        )
+                    healing_items = self.food_service.get_available_healing_items()
+                    if any(quantity > 0 for quantity, _ in healing_items.values()):
+                        refill_attempted = False
+                        continue
 
             logger.info("No non-overflowing healing item available; resting.")
             if not self.rest():
@@ -478,7 +512,27 @@ class CombatService:
 
         return hp >= target_hp
 
+    def _run_with_food(self, operation: Callable[[], bool]) -> bool:
+        """Run one combat workflow with food provisioned and leftovers returned."""
+        success = False
+        try:
+            if not self.food_service.prepare_food():
+                return False
+            success = operation()
+        finally:
+            if not self.food_service.return_unused_food():
+                logger.error("Could not return unused combat food to the bank.")
+                success = False
+        return success
+
     def fight_monster_by_code(self, monster_code: str, count: int = 1) -> bool:
+        """Provision food, fight a monster multiple times, then return leftovers."""
+        if count <= 0:
+            logger.error("Fight count must be positive.")
+            return False
+        return self._run_with_food(lambda: self._fight_monster_by_code(monster_code, count))
+
+    def _fight_monster_by_code(self, monster_code: str, count: int = 1) -> bool:
         """Move to monster location and fight it multiple times.
 
         Args:
@@ -500,7 +554,7 @@ class CombatService:
             required_hp = self._minimum_hp_to_fight(monster_code)
             for attempt in range(1, count + 1):
                 logger.info(f"Fight attempt {attempt}/{count} for {monster_code}")
-                if not self._recover_to_hp(required_hp):
+                if not self._recover_to_hp(required_hp, monster_code):
                     logger.error("Failed to reach the required HP before fight")
                     return False
 
@@ -509,12 +563,9 @@ class CombatService:
                     logger.error("Failed to fight monster")
                     return False
 
-                # Last fight: rest afterwards
-                if attempt == count:
-                    if not self.rest():
-                        logger.error("Failed to rest after final fight")
-                        return False
-                    break
+                if attempt == count and not self.rest():
+                    logger.error("Failed to rest after the final fight")
+                    return False
 
             logger.info(f"Successfully fought {monster_code} {count} time(s)")
             return True
