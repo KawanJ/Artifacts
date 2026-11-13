@@ -55,7 +55,23 @@ class FakeGameAPI:
             "weaponcrafting_level": 0,
             "fishing_level": 10,
             "cooking_level": 10,
+            "task": None,
+            "task_type": None,
+            "task_progress": 0,
+            "task_total": 0,
+            "inventory_max_items": max_inventory_slots,
         }
+        self.task_offer: dict[str, Any] = {
+            "code": "copper_ore",
+            "type": "items",
+            "total": 1,
+            "rewards": {
+                "gold": 150,
+                "items": [{"code": "tasks_coin", "quantity": 2}],
+            },
+        }
+        self.accepted_tasks = 0
+        self.completed_tasks = 0
         self.items: dict[str, dict[str, Any]] = {
             "copper_ore": {
                 "code": "copper_ore",
@@ -202,6 +218,62 @@ class FakeGameAPI:
             self.character["y"] = data["y"]
             self.moves.append((data["x"], data["y"]))
             return self._response()
+        if endpoint.endswith("/action/task/new"):
+            if self.character.get("task_type"):
+                raise APIError("An active task already exists", status_code=400)
+            self.accepted_tasks += 1
+            self.character.update(
+                {
+                    "task": self.task_offer["code"],
+                    "task_type": self.task_offer["type"],
+                    "task_progress": 0,
+                    "task_total": self.task_offer["total"],
+                }
+            )
+            return self._response(
+                {
+                    "task": self.task_offer,
+                    "character": self.character,
+                }
+            )
+        if endpoint.endswith("/action/task/trade"):
+            code, quantity = data["code"], data["quantity"]
+            if (
+                self.character.get("task_type") != "items"
+                or code != self.character.get("task")
+                or quantity > self.character["task_total"] - self.character["task_progress"]
+            ):
+                raise APIError("Items do not match the active task", status_code=400)
+            self._remove(self.inventory, code, quantity)
+            self.character["task_progress"] += quantity
+            return self._response(
+                {
+                    "trade": {"code": code, "quantity": quantity},
+                    "character": self.character,
+                }
+            )
+        if endpoint.endswith("/action/task/complete"):
+            if (
+                not self.character.get("task_type")
+                or self.character["task_progress"] < self.character["task_total"]
+            ):
+                raise APIError("The active task is not complete", status_code=400)
+            rewards = self.task_offer.get("rewards", {})
+            self.character["gold"] = self.character.get("gold", 0) + rewards.get(
+                "gold", 0
+            )
+            for item in rewards.get("items", []):
+                self._add(self.inventory, item["code"], item["quantity"])
+            self.completed_tasks += 1
+            self.character.update(
+                {
+                    "task": None,
+                    "task_type": None,
+                    "task_progress": 0,
+                    "task_total": 0,
+                }
+            )
+            return self._response({"rewards": rewards, "character": self.character})
         if endpoint.endswith("/action/gathering"):
             self.gather_attempts += 1
             resource_code = next(
@@ -214,10 +286,7 @@ class FakeGameAPI:
             )
             if resource_code is None:
                 raise APIError("No resource at current location", status_code=400)
-            if (
-                resource_code not in self.inventory
-                and len(self.inventory) >= self.max_inventory_slots
-            ):
+            if sum(self.inventory.values()) >= self.max_inventory_slots:
                 raise APIError("Inventory is full", status_code=497)
             self._add(self.inventory, resource_code, 1)
             self._add(self.gathered, resource_code, 1)

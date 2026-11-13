@@ -1,7 +1,7 @@
 # Artifacts MMO Automation
 
-Python automation for gathering resources, crafting items, fighting monsters, and
-leveling crafting skills in Artifacts MMO.
+Python automation for gathering resources, crafting items, fighting monsters,
+leveling crafting skills, and completing item tasks in Artifacts MMO.
 
 ## Project structure
 
@@ -11,6 +11,7 @@ leveling crafting skills in Artifacts MMO.
 │   ├── fight_monsters.yml
 │   ├── gather_resources.yml
 │   ├── level_crafting_skills.yml
+│   ├── complete_item_task.yml
 │   └── tests.yml
 ├── scripts/
 │   ├── bootstrap.py              # Shared construction of the service graph
@@ -26,7 +27,8 @@ leveling crafting skills in Artifacts MMO.
 │       ├── character_service.py
 │       ├── crafting_service.py
 │       ├── movement_service.py
-│       └── resource_service.py
+│       ├── resource_service.py
+│       └── task_service.py
 └── tests/                        # Mirrors scripts/ and src/
 ```
 
@@ -43,13 +45,14 @@ the game actions to those services.
 | `domain/` | Holds local game reference data and calculations that do not perform API actions. |
 | `CharacterService` | Reads character state, inventory, and skills; equips and uses items. |
 | `MovementService` | Moves the character to resource, monster, bank, and crafting locations. |
-| `ResourceService` | Resolves gathering requirements, selects an available gathering tool, gathers resources, and handles a full-inventory retry. |
+| `ResourceService` | Resolves gathering requirements, selects an available gathering tool, gathers resources, retries after a full inventory, and can stop a task batch at capacity. |
 | `CraftingService` | Resolves recipe requirements recursively, obtains missing resources or monster drops, travels to a crafting station, crafts, and cleans up inventory. |
 | `combat/CombatService` | Coordinates combat runs and monster-drop farming. `FightService` performs individual fights; `CombatEquipmentService` selects a weapon; `CombatRecoveryService` manages HP recovery; `CombatFoodService` provisions, replenishes, and returns food. |
 | `inventory/BankService` | Deposits and withdraws items through the bank. |
 | `inventory/InventoryCleanupService` | Deposits unneeded items while preserving reserved quantities, equipped items, weapons, and gathering tools. |
 | `items/ItemCatalogService` | Retrieves item metadata used by gathering, crafting, combat, and cleanup. |
 | `items/RecyclingService` | Recycles crafted items for crafting-skill experience. |
+| `TaskService` | Accepts or resumes an item task, produces its target in inventory-safe batches, trades batches at the Items Tasks Master, and cleans up rewards. |
 
 Gathering and combat attempt to free inventory space and retry once when an
 action fails because the inventory is full. End-of-run cleanup deposits
@@ -58,7 +61,7 @@ needed for the recipe.
 
 ## Automation workflows
 
-All four game workflows are manually dispatched through GitHub Actions. They
+All five game workflows are manually dispatched through GitHub Actions. They
 use the `ARTIFACTS_API_KEY` repository secret and pass their inputs to the
 corresponding script.
 
@@ -68,6 +71,34 @@ corresponding script.
 | Craft Items | `item_code`, `quantity` (default `1`) | `scripts/craft_items.py` |
 | Fight Monsters | `monster_code`, `times` (default `1`) | `scripts/fight_monsters.py` |
 | Level crafting skills | `skill`, `item_code` | `scripts/level_crafting_skills.py` |
+| Complete Item Task | None; resumes an active item task or accepts one | `scripts/complete_item_task.py` |
+
+### Complete an item task
+
+The workflow starts at the hardcoded Items Tasks Master location, resumes an
+active item task or accepts one when no task is active, and produces its target
+in inventory-safe batches. Raw resources are gathered until inventory capacity
+is reached; craftable tasks estimate their base ingredients to choose a
+capacity-safe batch. After each batch, it trades the deliverable and refreshes
+server task progress. On completion, normal cleanup banks unneeded reward
+items such as task coins. Gold remains character currency. It assumes the
+target item is not already in inventory or the bank and that the inventory has
+no unnecessary items when the workflow starts.
+
+```mermaid
+flowchart TD
+    A["Dispatch item task"] --> B["Read active task"]
+    B --> C{"Active task?"}
+    C -- "No" --> D["Accept item task"]
+    C -- "Yes" --> E["Read target and remaining progress"]
+    D --> E
+    E --> F["Produce a capacity-safe batch"]
+    F --> G["Trade batch at Items Tasks Master"]
+    G --> H["Refresh server task progress"]
+    H --> I{"Task complete?"}
+    I -- "No" --> F
+    I -- "Yes" --> J["Complete task and bank unneeded rewards"]
+```
 
 ### Gather resources
 

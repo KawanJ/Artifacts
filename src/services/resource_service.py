@@ -99,6 +99,7 @@ class ResourceService:
         attempt: int,
         keep_items: Mapping[str, int],
         allow_retry: bool = True,
+        stop_when_inventory_full: bool = False,
     ) -> bool:
         """Attempt a single gather action, optionally retrying after banking if inventory is full."""
         try:
@@ -116,6 +117,11 @@ class ResourceService:
 
         except APIError as e:
             if allow_retry and e.status_code == 497:
+                if stop_when_inventory_full:
+                    logger.info(
+                        "Inventory reached capacity; stopping this gathering batch."
+                    )
+                    return True
                 logger.warning(
                     "Inventory is full; depositing unneeded items and retrying..."
                 )
@@ -131,6 +137,7 @@ class ResourceService:
                     attempt,
                     keep_items,
                     allow_retry=False,
+                    stop_when_inventory_full=stop_when_inventory_full,
                 )
 
             logger.error(f"Failed to gather on attempt {attempt}: {e}")
@@ -145,6 +152,7 @@ class ResourceService:
         resource_code: str,
         amount: int = 1,
         keep_items: Mapping[str, int] | None = None,
+        stop_when_inventory_full: bool = False,
     ) -> bool:
         """Gather a specific resource multiple times.
 
@@ -152,6 +160,7 @@ class ResourceService:
             resource_code: Code of the resource to gather.
             amount: Number of times to gather.
             keep_items: Quantities reserved by the calling operation.
+            stop_when_inventory_full: End a partial batch when capacity is reached.
 
         Returns:
             True if successful, False otherwise.
@@ -159,7 +168,12 @@ class ResourceService:
         keep_items = keep_items or {}
         success = False
         try:
-            success = self._gather_resource(resource_code, amount, keep_items)
+            success = self._gather_resource(
+                resource_code,
+                amount,
+                keep_items,
+                stop_when_inventory_full,
+            )
         except Exception as e:
             logger.error("Unexpected error gathering resource: %s", e, exc_info=True)
 
@@ -173,6 +187,7 @@ class ResourceService:
         resource_code: str,
         amount: int,
         keep_items: Mapping[str, int],
+        stop_when_inventory_full: bool = False,
     ) -> bool:
         logger.info(f"Gathering {resource_code} {amount} times...")
 
@@ -192,11 +207,36 @@ class ResourceService:
 
             # Gather the specified amount of times
             for i in range(amount):
-                logger.info(f"Gathering attempt {i + 1}/{amount}...")
-                if not self._gather_once(resource_code, i + 1, keep_items):
-                    return False
+                inventory_space_before = (
+                    self.character_service.get_inventory_space()
+                    if stop_when_inventory_full
+                    else None
+                )
+                if inventory_space_before is not None and inventory_space_before <= 0:
+                    logger.info("Inventory is full; ending the gathering batch.")
+                    break
 
-            logger.info(f"Successfully gathered {resource_code} {amount} times")
+                logger.info(f"Gathering attempt {i + 1}/{amount}...")
+                if not self._gather_once(
+                    resource_code,
+                    i + 1,
+                    keep_items,
+                    stop_when_inventory_full=stop_when_inventory_full,
+                ):
+                    return False
+                if stop_when_inventory_full:
+                    inventory_space_after = self.character_service.get_inventory_space()
+                    if inventory_space_after >= inventory_space_before:
+                        logger.info(
+                            "No inventory space for another gather result; "
+                            "ending the gathering batch."
+                        )
+                        break
+                    if inventory_space_after <= 0:
+                        logger.info("Inventory is full; ending the gathering batch.")
+                        break
+
+            logger.info(f"Gathering batch for {resource_code} completed")
             return True
 
         except ValueError as e:
