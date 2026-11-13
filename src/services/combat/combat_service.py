@@ -1,7 +1,7 @@
 """Combat service for fighting monsters."""
 import logging
 import math
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Mapping
 
 from src.client.api_client import APIClient
 from src.config.settings import settings
@@ -127,25 +127,58 @@ class CombatService:
 
         return None
 
-    def fight_monster(self, monster_code: str) -> Dict[str, Any] | None:
+    def fight_monster(
+        self,
+        monster_code: str,
+        keep_items: Mapping[str, int] | None = None,
+    ) -> Dict[str, Any] | None:
         """Fight a monster at current location.
 
         Returns:
             Fight response data if successful, None otherwise.
         """
-        return self.action_service.fight_once(monster_code)
+        return self.action_service.fight_once(monster_code, keep_items=keep_items)
 
-    def farm_drops(self, target_item_code: str, target_quantity: int, monster_code: str | None = None) -> bool:
+    def farm_drops(
+        self,
+        target_item_code: str,
+        target_quantity: int,
+        monster_code: str | None = None,
+        keep_items: Mapping[str, int] | None = None,
+    ) -> bool:
         """Provision food, farm drops, then return unused run-provisioned food."""
         if target_quantity <= 0:
             logger.info("No drops required; skipping combat drop farming.")
             return True
-        return self._run_with_food(
-            lambda: self._farm_drops(target_item_code, target_quantity, monster_code)
+        workflow_keep_items = dict(keep_items or {})
+        workflow_keep_items[target_item_code] = max(
+            workflow_keep_items.get(target_item_code, 0),
+            target_quantity,
         )
+        success = False
+        try:
+            success = self._run_with_food(
+                lambda: self._farm_drops(
+                    target_item_code,
+                    target_quantity,
+                    monster_code,
+                    workflow_keep_items,
+                ),
+                workflow_keep_items,
+            )
+        except Exception as e:
+            logger.error("Drop-farming workflow failed: %s", e, exc_info=True)
+        if not self.banking_service.deposit_unneeded_items(workflow_keep_items):
+            logger.error("Failed to deposit unneeded items after drop farming.")
+            success = False
+        return success
 
     def _farm_drops(
-        self, target_item_code: str, target_quantity: int, monster_code: str | None = None
+        self,
+        target_item_code: str,
+        target_quantity: int,
+        monster_code: str | None = None,
+        keep_items: Mapping[str, int] | None = None,
     ) -> bool:
         """Fight monsters until required drop quantity is achieved.
 
@@ -178,7 +211,7 @@ class CombatService:
                 logger.error("Failed to reach the required HP before farming fight")
                 return False
 
-            fight_response = self.fight_monster(monster_code)
+            fight_response = self.fight_monster(monster_code, keep_items=keep_items)
             if not fight_response:
                 logger.error("Fight failed during drop farm; aborting")
                 return False
@@ -211,11 +244,15 @@ class CombatService:
         """Rest to recover health/mana."""
         return self.recovery_service.rest()
 
-    def _run_with_food(self, operation: Callable[[], bool]) -> bool:
+    def _run_with_food(
+        self,
+        operation: Callable[[], bool],
+        keep_items: Mapping[str, int] | None = None,
+    ) -> bool:
         """Run one combat workflow with food provisioned and leftovers returned."""
         success = False
         try:
-            if not self.food_service.prepare_food():
+            if not self.food_service.prepare_food(keep_items=keep_items):
                 return False
             success = operation()
         finally:
@@ -229,7 +266,18 @@ class CombatService:
         if count <= 0:
             logger.error("Fight count must be positive.")
             return False
-        return self._run_with_food(lambda: self._fight_monster_by_code(monster_code, count))
+        success = False
+        try:
+            success = self._run_with_food(
+                lambda: self._fight_monster_by_code(monster_code, count),
+                keep_items={},
+            )
+        except Exception as e:
+            logger.error("Combat workflow failed: %s", e, exc_info=True)
+        if not self.banking_service.deposit_unneeded_items():
+            logger.error("Failed to deposit unneeded items after combat.")
+            success = False
+        return success
 
     def _fight_monster_by_code(self, monster_code: str, count: int = 1) -> bool:
         """Move to monster location and fight it multiple times.

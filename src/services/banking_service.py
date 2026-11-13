@@ -2,10 +2,12 @@
 
 import logging
 import time
-from typing import Dict
+from typing import Dict, Mapping
 
 from src.client.api_client import APIClient, APIError
+from src.models.gathering_tools import GATHERING_TOOLS
 from src.services.character_service import CharacterService
+from src.services.item_service import ItemService
 from src.services.movement_service import MovementService
 
 logger = logging.getLogger(__name__)
@@ -16,20 +18,6 @@ class BankingService:
 
     # Bank coordinates in the world
     BANK_LOCATION = (4, 1)
-
-    # List of common items to deposit during long-running tasks (e.g. combat).
-    # Update this list as needed.
-    COMMON_ITEMS = [
-        "apple",
-        "raw_chicken",
-        "egg",
-        "feather",
-        "sap",
-        "topaz_stone",
-        "emerald_stone",
-        "ruby_stone",
-        "sapphire_stone",
-    ]
 
     def __init__(self, api_client: APIClient, character_name: str):
         """Initialize banking service.
@@ -42,19 +30,7 @@ class BankingService:
         self.character_name = character_name
         self.movement_service = MovementService(api_client, character_name)
         self.character_service = CharacterService(api_client, character_name)
-
-    def deposit_item(self, item_code: str) -> bool:
-        """Deposit all of a specific item from inventory into the bank.
-
-        Args:
-            item_code: Item code to deposit.
-
-        Returns:
-            True if deposit succeeded or item was not present, False otherwise.
-        """
-        return self.deposit_items(
-            {item_code: self.character_service.get_inventory().get(item_code, 0)}
-        )
+        self.item_service = ItemService(api_client)
 
     def get_bank_item_quantity(self, item_code: str) -> int:
         """Return the quantity of one item currently held in the bank."""
@@ -144,48 +120,67 @@ class BankingService:
             logger.error("Unexpected error during bank deposit: %s", e)
             return False
 
-    def deposit_common_items(self) -> bool:
-        """Deposit commonly collected items into the bank.
+    def deposit_unneeded_items(
+        self,
+        keep_items: Mapping[str, int] | None = None,
+    ) -> bool:
+        """Deposit inventory except reserved quantities and tools or weapons."""
+        keep_items = keep_items or {}
+        try:
+            character_data = self.character_service.get_character_data()
+        except Exception as e:
+            logger.error("Could not inspect character inventory for cleanup: %s", e)
+            return False
+        if not isinstance(character_data, dict):
+            logger.error("Character inventory response is invalid; aborting cleanup.")
+            return False
+        inventory_entries = character_data.get("inventory", []) or []
+        inventory: Dict[str, int] = {}
+        for entry in inventory_entries:
+            if not isinstance(entry, dict):
+                continue
+            code = entry.get("code")
+            quantity = int(entry.get("quantity", 0) or 0)
+            if code and quantity > 0:
+                inventory[code] = inventory.get(code, 0) + quantity
 
-        The list of common items can be updated in the `COMMON_ITEMS` class attribute.
+        protected_codes = {
+            code
+            for key, code in character_data.items()
+            if key.endswith("_slot") and isinstance(code, str) and code
+        }
+        protected_codes.update(
+            tool_code
+            for tools in GATHERING_TOOLS.values()
+            for tool_code in tools
+        )
 
-        Returns:
-            True if deposit succeeded (or no items existed), False otherwise.
-        """
-        inventory = self.character_service.get_inventory()
+        items_to_deposit: Dict[str, int] = {}
+        for code, quantity in inventory.items():
+            if code in protected_codes:
+                continue
 
-        items_to_deposit = []
-        for code in self.COMMON_ITEMS:
-            qty = inventory.get(code, 0)
-            if qty > 0:
-                items_to_deposit.append({"code": code, "quantity": qty})
+            try:
+                item_data = self.item_service.get_item(code)
+            except Exception:
+                logger.exception(
+                    "Could not inspect inventory item '%s'; aborting cleanup.", code
+                )
+                return False
+            if not isinstance(item_data, dict):
+                logger.error("Could not inspect inventory item '%s'; aborting cleanup.", code)
+                return False
+            if item_data.get("type") in {"tool", "weapon"}:
+                continue
+
+            reserved = max(0, int(keep_items.get(code, 0) or 0))
+            quantity_to_deposit = max(0, quantity - reserved)
+            if quantity_to_deposit:
+                items_to_deposit[code] = quantity_to_deposit
 
         if not items_to_deposit:
-            logger.info("No common items found in inventory to deposit.")
+            logger.info("No unneeded inventory items to deposit.")
             return True
 
-        x, y = self.BANK_LOCATION
-        if not self.movement_service.move_to_location(x, y):
-            logger.error("Failed to move to the bank location.")
-            return False
-
-        logger.info(f"Depositing common items to bank: {[i['code'] for i in items_to_deposit]}")
-        try:
-            response = self.api_client.post(
-                f"/my/{self.character_name}/action/bank/deposit/item",
-                data=items_to_deposit,
-            )
-            logger.debug(f"Bank deposit response: {response}")
-
-            cooldown_data = response.get("data", {}).get("cooldown")
-            if cooldown_data and "total_seconds" in cooldown_data:
-                cooldown_seconds = cooldown_data["total_seconds"]
-                logger.info(f"Waiting {cooldown_seconds} seconds for deposit cooldown...")
-                time.sleep(cooldown_seconds)
-            return True
-        except APIError as e:
-            logger.error(f"Failed to deposit common items to bank: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected error during bank deposit: {e}")
-            return False
+        logger.info("Depositing unneeded inventory items: %s", items_to_deposit)
+        return self.deposit_items(items_to_deposit)

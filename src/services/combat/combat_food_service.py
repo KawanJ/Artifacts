@@ -2,7 +2,7 @@
 import logging
 import math
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Mapping, Tuple
 
 from src.client.api_client import APIClient
 from src.models.crafting_locations import get_crafting_location
@@ -41,6 +41,7 @@ class CombatFoodService:
         self.provisioned_quantities: Dict[str, int] = {}
         self.used_quantities: Dict[str, int] = {}
         self._provisioning_started = False
+        self.workflow_keep_items: Dict[str, int] = {}
 
     def _load_food_data(self) -> bool:
         """Load and validate every item explicitly allowed for combat."""
@@ -132,7 +133,12 @@ class CombatFoodService:
 
         return sorted(candidates, reverse=True)
 
-    def _cook_food(self, quantity_needed: int, character_data: Dict[str, Any]) -> int:
+    def _cook_food(
+        self,
+        quantity_needed: int,
+        character_data: Dict[str, Any],
+        keep_items: Mapping[str, int],
+    ) -> int:
         """Fish and cook the best allowlisted recipe for the character's skills."""
         candidates = self._fish_food_candidates(character_data)
         if not candidates:
@@ -154,7 +160,15 @@ class CombatFoodService:
             fish_code,
             fish_quantity,
         )
-        if not self.resource_service.gather_resource(fish_code, fish_quantity):
+        gather_keep_items = dict(keep_items)
+        gather_keep_items[fish_code] = (
+            gather_keep_items.get(fish_code, 0) + fish_quantity
+        )
+        if not self.resource_service.gather_resource(
+            fish_code,
+            fish_quantity,
+            keep_items=gather_keep_items,
+        ):
             logger.warning("Could not gather %s; continuing with banked food only.", fish_code)
             return 0
 
@@ -187,6 +201,7 @@ class CombatFoodService:
         self,
         character_data: Dict[str, Any] | None = None,
         inventory: Dict[str, int] | None = None,
+        keep_items: Mapping[str, int] | None = None,
     ) -> bool:
         """Top up current inventory to the configured target."""
         if not self.allowed_food_codes:
@@ -235,17 +250,24 @@ class CombatFoodService:
         if remaining:
             if character_data is None:
                 character_data = self.character_service.get_character_data()
-            self._cook_food(remaining, character_data)
+            self._cook_food(remaining, character_data, keep_items or {})
 
         return True
 
-    def prepare_food(self) -> bool:
+    def prepare_food(
+        self,
+        keep_items: Mapping[str, int] | None = None,
+    ) -> bool:
         """Withdraw food and cook any shortfall before a combat run."""
+        self.workflow_keep_items = dict(keep_items or {})
         self.baseline_inventory = self.character_service.get_inventory()
         self.provisioned_quantities = {}
         self.used_quantities = {}
         self._provisioning_started = True
-        return self._provision_to_target(inventory=self.baseline_inventory)
+        return self._provision_to_target(
+            inventory=self.baseline_inventory,
+            keep_items=self.workflow_keep_items,
+        )
 
     def replenish_food(self) -> bool:
         """Top up depleted food between fights and return to the current location."""
@@ -261,7 +283,10 @@ class CombatFoodService:
         provided_before = sum(self.provisioned_quantities.values())
         succeeded = False
         try:
-            succeeded = self._provision_to_target(character_data)
+            succeeded = self._provision_to_target(
+                character_data,
+                keep_items=self.workflow_keep_items,
+            )
         finally:
             if not self.movement_service.move_to_location(x, y):
                 raise RuntimeError(
