@@ -58,6 +58,14 @@ class CharacterServiceTests(unittest.TestCase):
 
         self.assertEqual(service.get_inventory(), {"cooked_shrimp": 5})
 
+    def test_inventory_space_uses_capacity_and_carried_quantities(self):
+        service = CharacterService(
+            FakeGameAPI(inventory={"cooked_shrimp": 2}, max_inventory_slots=5),
+            "tester",
+        )
+
+        self.assertEqual(service.get_inventory_space(), 3)
+
     def test_actions_succeed_when_api_omits_cooldown(self):
         api = NoCooldownCharacterAPI(inventory={"cooked_shrimp": 1, "wooden_staff": 1})
         service = CharacterService(api, "tester")

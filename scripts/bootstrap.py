@@ -17,6 +17,7 @@ from src.services.items.item_catalog_service import ItemCatalogService
 from src.services.movement_service import MovementService
 from src.services.items.recycling_service import RecyclingService
 from src.services.resource_service import ResourceService
+from src.services.task_service import TaskService
 
 
 @dataclass
@@ -28,6 +29,7 @@ class AutomationServices:
     combat: CombatService
     character: CharacterService
     recycling: RecyclingService
+    tasks: TaskService
 
 
 def build_services(
@@ -93,10 +95,22 @@ def build_services(
         character_name,
     )
 
+    tasks = TaskService(
+        api_client,
+        character_name,
+        movement,
+        character,
+        cleanup,
+        items,
+        resource,
+        crafting,
+    )
+
     return AutomationServices(
         resource=resource,
         crafting=crafting,
         combat=combat,
         character=character,
         recycling=RecyclingService(api_client, character_name),
+        tasks=tasks,
     )

@@ -56,6 +56,17 @@ class CharacterService:
         logger.debug(f"Inventory summary: {result}")
         return result
 
+    def get_inventory_space(self) -> int:
+        """Return the number of items that can still fit in the inventory."""
+        data = self.get_character_data()
+        maximum = int(data.get("inventory_max_items", 0) or 0)
+        inventory = data.get("inventory", []) or []
+        used = sum(
+            int(item.get("quantity", 0) or 0)
+            for item in inventory
+        )
+        return maximum - used
+
     def use_item(self, item_code: str, quantity: int = 1) -> bool:
         """Use an item via the character action endpoint."""
         logger.info("Using item: %s x%s", item_code, quantity)

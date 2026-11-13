@@ -5,6 +5,7 @@ from typing import Dict, Tuple
 Position = Tuple[int, int]
 
 BANK_LOCATION: Position = (4, 1)
+ITEMS_TASK_MASTER_LOCATION: Position = (4, 13)
 
 CRAFTING_LOCATIONS: Dict[str, Position] = {
     "weaponcrafting": (2, 1),
