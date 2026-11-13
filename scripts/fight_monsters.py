@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config.settings import settings
 from src.client.api_client import APIClient
-from src.services.combat_service import CombatService
+from src.services.combat.combat_service import CombatService
 
 logging.basicConfig(
     level=settings.log_level,

@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 from src.client.api_client import APIClient
 from src.models.crafting_locations import get_crafting_location
 from src.services.character_service import CharacterService
-from src.services.combat_service import CombatService
+from src.services.combat.combat_service import CombatService
 from src.services.item_service import ItemService
 from src.services.movement_service import MovementService
 from src.services.resource_service import ResourceService
