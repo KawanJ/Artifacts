@@ -1,62 +1,55 @@
-"""Combat service for fighting monsters."""
+"""Combat service coordinating fights and preparation."""
 import logging
 import math
 from typing import Any, Callable, Dict, Mapping
 
-from src.client.api_client import APIClient
-from src.config.settings import settings
-from src.services.banking_service import BankingService
+from src.client.api_client import APIClient, APIError
+from src.domain.combat.damage import estimate_damage_per_turn
+from src.domain.world import get_monster_location
 from src.services.character_service import CharacterService
-from src.services.combat.combat_action_service import CombatActionService
-from src.services.combat.combat_damage import estimate_damage_per_turn
 from src.services.combat.combat_equipment_service import CombatEquipmentService
 from src.services.combat.combat_food_service import CombatFoodService
 from src.services.combat.combat_recovery_service import CombatRecoveryService
-from src.services.item_service import ItemService
+from src.services.combat.fight_service import FightService
+from src.services.inventory.inventory_cleanup_service import InventoryCleanupService
 from src.services.movement_service import MovementService
 
 logger = logging.getLogger(__name__)
 
 
 class CombatService:
-    """Service for managing combat and monster fights."""
+    """Coordinate equipment, provisioning, recovery, and combat actions."""
 
-    def __init__(self, api_client: APIClient, character_name: str):
-        """Initialize CombatService.
-        
-        Args:
-            api_client: API client instance.
-            character_name: Name of the character to control.
-        """
+    def __init__(
+        self,
+        api_client: APIClient,
+        character_name: str,
+        movement_service: MovementService,
+        character_service: CharacterService,
+        cleanup_service: InventoryCleanupService,
+        equipment_service: CombatEquipmentService,
+        fight_service: FightService,
+        food_service: CombatFoodService,
+        recovery_service: CombatRecoveryService,
+    ):
         self.api_client = api_client
         self.character_name = character_name
-        self.movement_service = MovementService(api_client, character_name)
-        self.character_service = CharacterService(api_client, character_name)
-        self.banking_service = BankingService(api_client, character_name)
-        self.item_service = ItemService(api_client)
-        self.equipment_service = CombatEquipmentService(
-            api_client,
-            self.character_service,
-            self.item_service,
-        )
-        self.action_service = CombatActionService(
-            api_client,
-            character_name,
-            self.banking_service,
-            self.movement_service,
-        )
-        self.food_service = CombatFoodService(
-            api_client,
-            character_name,
-            settings.combat_food_allowlist,
-            settings.combat_food_count,
-        )
-        self.recovery_service = CombatRecoveryService(
-            api_client,
-            character_name,
-            self.food_service,
-            self.equipment_service,
-        )
+        self.movement_service = movement_service
+        self.character_service = character_service
+        self.cleanup_service = cleanup_service
+        self.equipment_service = equipment_service
+        self.fight_service = fight_service
+        self.food_service = food_service
+        self.recovery_service = recovery_service
+
+    def move_to_monster(self, monster_code: str) -> bool:
+        """Move to a monster's configured location."""
+        x, y = get_monster_location(monster_code)
+        logger.info("Monster %s is at (%s, %s)", monster_code, x, y)
+        if not self.movement_service.move_to_location(x, y):
+            logger.error("Failed to move to monster location")
+            return False
+        return True
 
     def _minimum_hp_to_fight(self, monster_code: str) -> int:
         """Estimate HP needed to survive the fight using minimum player damage."""
@@ -137,7 +130,29 @@ class CombatService:
         Returns:
             Fight response data if successful, None otherwise.
         """
-        return self.action_service.fight_once(monster_code, keep_items=keep_items)
+        try:
+            return self.fight_service.fight_once()
+        except APIError as e:
+            if e.status_code != 497:
+                logger.error("Failed to fight monster: %s", e)
+                return None
+
+            logger.warning(
+                "Inventory full during fight; depositing unneeded items and retrying..."
+            )
+            if not self.cleanup_service.deposit_unneeded_items(keep_items):
+                logger.error("Failed to deposit unneeded items; aborting fight.")
+                return None
+            if not self.move_to_monster(monster_code):
+                return None
+            try:
+                return self.fight_service.fight_once()
+            except Exception as retry_error:
+                logger.error("Fight retry failed: %s", retry_error)
+                return None
+        except Exception as e:
+            logger.error("Failed to fight monster: %s", e)
+            return None
 
     def farm_drops(
         self,
@@ -150,25 +165,25 @@ class CombatService:
         if target_quantity <= 0:
             logger.info("No drops required; skipping combat drop farming.")
             return True
-        workflow_keep_items = dict(keep_items or {})
-        workflow_keep_items[target_item_code] = max(
-            workflow_keep_items.get(target_item_code, 0),
+        items_to_keep = dict(keep_items or {})
+        items_to_keep[target_item_code] = max(
+            items_to_keep.get(target_item_code, 0),
             target_quantity,
         )
         success = False
         try:
-            success = self._run_with_food(
+            success = self._with_combat_food(
                 lambda: self._farm_drops(
                     target_item_code,
                     target_quantity,
                     monster_code,
-                    workflow_keep_items,
+                    items_to_keep,
                 ),
-                workflow_keep_items,
+                items_to_keep,
             )
         except Exception as e:
-            logger.error("Drop-farming workflow failed: %s", e, exc_info=True)
-        if not self.banking_service.deposit_unneeded_items(workflow_keep_items):
+            logger.error("Drop farming failed: %s", e, exc_info=True)
+        if not self.cleanup_service.deposit_unneeded_items(items_to_keep):
             logger.error("Failed to deposit unneeded items after drop farming.")
             success = False
         return success
@@ -198,7 +213,7 @@ class CombatService:
         if not self.equipment_service.equip_best_weapon(monster_code):
             logger.warning("Unable to equip combat weapon; continuing without a dedicated weapon.")
 
-        if not self.action_service.move_to_monster(monster_code):
+        if not self.move_to_monster(monster_code):
             return False
 
         required_hp = self._minimum_hp_to_fight(monster_code)
@@ -244,12 +259,12 @@ class CombatService:
         """Rest to recover health/mana."""
         return self.recovery_service.rest()
 
-    def _run_with_food(
+    def _with_combat_food(
         self,
         operation: Callable[[], bool],
         keep_items: Mapping[str, int] | None = None,
     ) -> bool:
-        """Run one combat workflow with food provisioned and leftovers returned."""
+        """Run a combat operation and return any unused provisioned food."""
         success = False
         try:
             if not self.food_service.prepare_food(keep_items=keep_items):
@@ -268,13 +283,13 @@ class CombatService:
             return False
         success = False
         try:
-            success = self._run_with_food(
+            success = self._with_combat_food(
                 lambda: self._fight_monster_by_code(monster_code, count),
                 keep_items={},
             )
         except Exception as e:
-            logger.error("Combat workflow failed: %s", e, exc_info=True)
-        if not self.banking_service.deposit_unneeded_items():
+            logger.error("Combat run failed: %s", e, exc_info=True)
+        if not self.cleanup_service.deposit_unneeded_items():
             logger.error("Failed to deposit unneeded items after combat.")
             success = False
         return success
@@ -295,7 +310,7 @@ class CombatService:
             # Ensure combat gear is in place for fight loops
             self.equipment_service.equip_best_weapon(monster_code)
 
-            if not self.action_service.move_to_monster(monster_code):
+            if not self.move_to_monster(monster_code):
                 return False
 
             required_hp = self._minimum_hp_to_fight(monster_code)

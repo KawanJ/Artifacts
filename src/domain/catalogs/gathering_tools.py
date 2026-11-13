@@ -1,10 +1,8 @@
 """Season-maintained gathering tools and their gathering effect values."""
-from typing import Dict
-
 
 # Verified against game item data on 2026-11-10; refresh at the start of each season.
 # Values are the item's gathering effects; lower (more negative) values are stronger.
-GATHERING_TOOLS: Dict[str, Dict[str, int]] = {
+GATHERING_TOOLS: dict[str, dict[str, int]] = {
     "mining": {
         "voidstone_pickaxe": -70,
         "adamantite_pickaxe": -60,

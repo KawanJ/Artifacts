@@ -1,36 +1,39 @@
-"""Banking service for depositing items into the bank."""
+"""Bank storage operations for depositing and withdrawing items."""
 
 import logging
 import time
-from typing import Dict, Mapping
+from typing import Dict
 
 from src.client.api_client import APIClient, APIError
-from src.models.gathering_tools import GATHERING_TOOLS
 from src.services.character_service import CharacterService
-from src.services.item_service import ItemService
 from src.services.movement_service import MovementService
+from src.domain.world import BANK_LOCATION
 
 logger = logging.getLogger(__name__)
 
 
-class BankingService:
-    """Service for depositing items into the bank."""
+class BankService:
+    """Perform bank operations, including travel to the bank."""
 
-    # Bank coordinates in the world
-    BANK_LOCATION = (4, 1)
-
-    def __init__(self, api_client: APIClient, character_name: str):
+    def __init__(
+        self,
+        api_client: APIClient,
+        character_name: str,
+        movement_service: MovementService,
+        character_service: CharacterService,
+    ):
         """Initialize banking service.
 
         Args:
             api_client: API client instance.
             character_name: Name of the character to operate on.
+            movement_service: Shared movement service.
+            character_service: Shared character data service.
         """
         self.api_client = api_client
         self.character_name = character_name
-        self.movement_service = MovementService(api_client, character_name)
-        self.character_service = CharacterService(api_client, character_name)
-        self.item_service = ItemService(api_client)
+        self.movement_service = movement_service
+        self.character_service = character_service
 
     def get_bank_item_quantity(self, item_code: str) -> int:
         """Return the quantity of one item currently held in the bank."""
@@ -56,7 +59,7 @@ class BankingService:
         ]
         if not items_to_withdraw:
             return True
-        x, y = self.BANK_LOCATION
+        x, y = BANK_LOCATION
         if not self.movement_service.move_to_location(x, y):
             logger.error("Failed to move to the bank to withdraw items.")
             return False
@@ -94,7 +97,7 @@ class BankingService:
             logger.info("No requested items found in inventory to deposit.")
             return True
 
-        x, y = self.BANK_LOCATION
+        x, y = BANK_LOCATION
         if not self.movement_service.move_to_location(x, y):
             logger.error("Failed to move to the bank location.")
             return False
@@ -120,67 +123,3 @@ class BankingService:
             logger.error("Unexpected error during bank deposit: %s", e)
             return False
 
-    def deposit_unneeded_items(
-        self,
-        keep_items: Mapping[str, int] | None = None,
-    ) -> bool:
-        """Deposit inventory except reserved quantities and tools or weapons."""
-        keep_items = keep_items or {}
-        try:
-            character_data = self.character_service.get_character_data()
-        except Exception as e:
-            logger.error("Could not inspect character inventory for cleanup: %s", e)
-            return False
-        if not isinstance(character_data, dict):
-            logger.error("Character inventory response is invalid; aborting cleanup.")
-            return False
-        inventory_entries = character_data.get("inventory", []) or []
-        inventory: Dict[str, int] = {}
-        for entry in inventory_entries:
-            if not isinstance(entry, dict):
-                continue
-            code = entry.get("code")
-            quantity = int(entry.get("quantity", 0) or 0)
-            if code and quantity > 0:
-                inventory[code] = inventory.get(code, 0) + quantity
-
-        protected_codes = {
-            code
-            for key, code in character_data.items()
-            if key.endswith("_slot") and isinstance(code, str) and code
-        }
-        protected_codes.update(
-            tool_code
-            for tools in GATHERING_TOOLS.values()
-            for tool_code in tools
-        )
-
-        items_to_deposit: Dict[str, int] = {}
-        for code, quantity in inventory.items():
-            if code in protected_codes:
-                continue
-
-            try:
-                item_data = self.item_service.get_item(code)
-            except Exception:
-                logger.exception(
-                    "Could not inspect inventory item '%s'; aborting cleanup.", code
-                )
-                return False
-            if not isinstance(item_data, dict):
-                logger.error("Could not inspect inventory item '%s'; aborting cleanup.", code)
-                return False
-            if item_data.get("type") in {"tool", "weapon"}:
-                continue
-
-            reserved = max(0, int(keep_items.get(code, 0) or 0))
-            quantity_to_deposit = max(0, quantity - reserved)
-            if quantity_to_deposit:
-                items_to_deposit[code] = quantity_to_deposit
-
-        if not items_to_deposit:
-            logger.info("No unneeded inventory items to deposit.")
-            return True
-
-        logger.info("Depositing unneeded inventory items: %s", items_to_deposit)
-        return self.deposit_items(items_to_deposit)

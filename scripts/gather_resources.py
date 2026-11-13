@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config.settings import settings
 from src.client.api_client import APIClient
-from src.services.resource_service import ResourceService
+from scripts.bootstrap import build_services
 
 # Configure logging for GitHub Actions
 logging.basicConfig(
@@ -52,15 +52,20 @@ def main():
             max_retries=settings.max_retries,
             timeout=settings.request_timeout,
         ) as client:
-            # Initialize service
-            resource_service = ResourceService(client, settings.character_name)
+            services = build_services(
+                client,
+                settings.character_name,
+                settings.combat_food_allowlist,
+                settings.combat_food_count,
+            )
             
             # Gather the resource
-            success = resource_service.gather_resource(resource_code, amount)
+            success = services.resource.gather_resource(resource_code, amount)
             if success:
                 logger.info("✓ Resource gathering completed successfully")
             else:
                 logger.warning("⚠ Resource gathering may have failed")
+                return 1
         
         logger.info("Resource gathering automation finished")
         return 0

@@ -4,32 +4,35 @@ import time
 from typing import Mapping
 
 from src.client.api_client import APIClient, APIError
-from src.services.banking_service import BankingService
+from src.domain.catalogs.gathering_tools import GATHERING_TOOLS
+from src.domain.world import get_resource_location
 from src.services.character_service import CharacterService
-from src.services.item_service import ItemService
+from src.services.inventory.inventory_cleanup_service import InventoryCleanupService
+from src.services.items.item_catalog_service import ItemCatalogService
 from src.services.movement_service import MovementService
-from src.models.gathering_tools import GATHERING_TOOLS
-from src.models.resource_locations import get_resource_location
 
 logger = logging.getLogger(__name__)
 
 
 class ResourceService:
-    """Service for managing resource gathering."""
+    """Gather resources, managing tools, movement, and inventory along the way."""
 
-    def __init__(self, api_client: APIClient, character_name: str):
-        """Initialize ResourceService.
-
-        Args:
-            api_client: API client instance.
-            character_name: Name of the character to control.
-        """
+    def __init__(
+        self,
+        api_client: APIClient,
+        character_name: str,
+        movement_service: MovementService,
+        cleanup_service: InventoryCleanupService,
+        character_service: CharacterService,
+        item_service: ItemCatalogService,
+    ):
+        """Initialize the resource service with shared dependencies."""
         self.api_client = api_client
         self.character_name = character_name
-        self.movement_service = MovementService(api_client, character_name)
-        self.banking_service = BankingService(api_client, character_name)
-        self.character_service = CharacterService(api_client, character_name)
-        self.item_service = ItemService(api_client)
+        self.movement_service = movement_service
+        self.cleanup_service = cleanup_service
+        self.character_service = character_service
+        self.item_service = item_service
 
     def _move_to_resource(self, resource_code: str) -> bool:
         # Get resource coordinates
@@ -101,16 +104,14 @@ class ResourceService:
         try:
             response = self.api_client.post(
                 f"/my/{self.character_name}/action/gathering",
-                data={}
+                data={},
             )
-            logger.debug(f"Gather result {attempt}: {response}")
-
-            cooldown_data = response.get("data", {}).get("cooldown")
-            if cooldown_data and "total_seconds" in cooldown_data:
-                cooldown_seconds = cooldown_data["total_seconds"]
-                logger.info(f"Waiting {cooldown_seconds} seconds for gather cooldown...")
-                time.sleep(cooldown_seconds)
-
+            logger.debug("Gather result %s: %s", attempt, response)
+            cooldown = response.get("data", {}).get("cooldown")
+            if cooldown and "total_seconds" in cooldown:
+                seconds = cooldown["total_seconds"]
+                logger.info("Waiting %s seconds for gather cooldown...", seconds)
+                time.sleep(seconds)
             return True
 
         except APIError as e:
@@ -118,7 +119,7 @@ class ResourceService:
                 logger.warning(
                     "Inventory is full; depositing unneeded items and retrying..."
                 )
-                if not self.banking_service.deposit_unneeded_items(keep_items):
+                if not self.cleanup_service.deposit_unneeded_items(keep_items):
                     logger.error("Failed to deposit unneeded items; aborting gather.")
                     return False
                 
@@ -150,7 +151,7 @@ class ResourceService:
         Args:
             resource_code: Code of the resource to gather.
             amount: Number of times to gather.
-            keep_items: Quantities reserved by the containing workflow.
+            keep_items: Quantities reserved by the calling operation.
 
         Returns:
             True if successful, False otherwise.
@@ -162,7 +163,7 @@ class ResourceService:
         except Exception as e:
             logger.error("Unexpected error gathering resource: %s", e, exc_info=True)
 
-        if not self.banking_service.deposit_unneeded_items(keep_items):
+        if not self.cleanup_service.deposit_unneeded_items(keep_items):
             logger.error("Failed to deposit unneeded items after gathering.")
             return False
         return success

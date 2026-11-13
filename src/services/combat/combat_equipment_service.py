@@ -4,11 +4,11 @@ from typing import Any, Dict
 
 from src.client.api_client import APIClient
 from src.services.character_service import CharacterService
-from src.services.combat.combat_damage import (
+from src.domain.combat.damage import (
     estimate_weapon_expected_damage,
     item_effects,
 )
-from src.services.item_service import ItemService
+from src.services.items.item_catalog_service import ItemCatalogService
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class CombatEquipmentService:
         self,
         api_client: APIClient,
         character_service: CharacterService,
-        item_service: ItemService,
+        item_service: ItemCatalogService,
     ):
         self.api_client = api_client
         self.character_service = character_service

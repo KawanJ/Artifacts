@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config.settings import settings
 from src.client.api_client import APIClient
-from src.services.combat.combat_service import CombatService
+from scripts.bootstrap import build_services
 
 logging.basicConfig(
     level=settings.log_level,
@@ -29,7 +29,7 @@ def main():
         
         # Get monster code from command line argument or environment variable
         monster_code = None
-        fight_count = 1
+        fight_count = None
 
         # Check command line arguments first
         if len(sys.argv) > 1:
@@ -48,7 +48,7 @@ def main():
             elif os.getenv("MONSTER_NAME"):
                 monster_code = os.getenv("MONSTER_NAME")
 
-        if not fight_count:
+        if fight_count is None:
             fight_count_env = os.getenv("MONSTER_FIGHT_COUNT") or os.getenv("MONSTER_COUNT")
             if fight_count_env:
                 try:
@@ -56,6 +56,8 @@ def main():
                 except ValueError:
                     logger.error(f"Invalid fight count '{fight_count_env}'; must be an integer")
                     return 1
+            else:
+                fight_count = 1
 
         if not monster_code:
             logger.error("Monster code not provided. Use: python fight_monsters.py <monster_code> [times]")
@@ -75,11 +77,18 @@ def main():
             max_retries=settings.max_retries,
             timeout=settings.request_timeout,
         ) as client:
-            # Initialize service
-            combat_service = CombatService(client, settings.character_name)
+            services = build_services(
+                client,
+                settings.character_name,
+                settings.combat_food_allowlist,
+                settings.combat_food_count,
+            )
 
             # Fight the monster multiple times (movement + recovery handled inside service)
-            success = combat_service.fight_monster_by_code(monster_code, count=fight_count)
+            success = services.combat.fight_monster_by_code(
+                monster_code,
+                count=fight_count,
+            )
             if success:
                 logger.info("✓ Monster combat completed successfully")
                 return 0

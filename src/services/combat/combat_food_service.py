@@ -5,11 +5,10 @@ import time
 from typing import Any, Dict, List, Mapping, Tuple
 
 from src.client.api_client import APIClient
-from src.models.crafting_locations import get_crafting_location
-from src.models.resource_locations import RESOURCE_LOCATIONS
-from src.services.banking_service import BankingService
+from src.domain.world import RESOURCE_LOCATIONS, get_crafting_location
+from src.services.inventory.bank_service import BankService
 from src.services.character_service import CharacterService
-from src.services.item_service import ItemService
+from src.services.items.item_catalog_service import ItemCatalogService
 from src.services.movement_service import MovementService
 from src.services.resource_service import ResourceService
 
@@ -25,23 +24,28 @@ class CombatFoodService:
         character_name: str,
         allowed_food_codes: Tuple[str, ...],
         target_quantity: int,
+        banking_service: BankService,
+        character_service: CharacterService,
+        item_service: ItemCatalogService,
+        movement_service: MovementService,
+        resource_service: ResourceService,
     ):
         self.api_client = api_client
         self.character_name = character_name
         self.allowed_food_codes = allowed_food_codes
         self.target_quantity = target_quantity
-        self.banking_service = BankingService(api_client, character_name)
-        self.character_service = CharacterService(api_client, character_name)
-        self.item_service = ItemService(api_client)
-        self.movement_service = MovementService(api_client, character_name)
-        self.resource_service = ResourceService(api_client, character_name)
+        self.banking_service = banking_service
+        self.character_service = character_service
+        self.item_service = item_service
+        self.movement_service = movement_service
+        self.resource_service = resource_service
         self.food_data: Dict[str, Dict[str, Any]] = {}
         self.heal_amounts: Dict[str, int] = {}
         self.baseline_inventory: Dict[str, int] = {}
         self.provisioned_quantities: Dict[str, int] = {}
         self.used_quantities: Dict[str, int] = {}
         self._provisioning_started = False
-        self.workflow_keep_items: Dict[str, int] = {}
+        self.reserved_items: Dict[str, int] = {}
 
     def _load_food_data(self) -> bool:
         """Load and validate every item explicitly allowed for combat."""
@@ -182,11 +186,11 @@ class CombatFoodService:
                 f"/my/{self.character_name}/action/crafting",
                 data={"code": food_code, "quantity": craft_count},
             )
-            cooldown_data = response.get("data", {}).get("cooldown")
-            if cooldown_data and "total_seconds" in cooldown_data:
-                cooldown_seconds = cooldown_data["total_seconds"]
-                logger.info("Waiting %s seconds for cooking cooldown...", cooldown_seconds)
-                time.sleep(cooldown_seconds)
+            cooldown = response.get("data", {}).get("cooldown")
+            if cooldown and "total_seconds" in cooldown:
+                seconds = cooldown["total_seconds"]
+                logger.info("Waiting %s seconds for cooking cooldown...", seconds)
+                time.sleep(seconds)
         except Exception as e:
             logger.warning("Could not cook %s: %s", food_code, e)
             return 0
@@ -250,7 +254,14 @@ class CombatFoodService:
         if remaining:
             if character_data is None:
                 character_data = self.character_service.get_character_data()
-            self._cook_food(remaining, character_data, keep_items or {})
+            cook_keep_items = dict(keep_items or {})
+            current_inventory = self.character_service.get_inventory()
+            for code in self.allowed_food_codes:
+                cook_keep_items[code] = max(
+                    cook_keep_items.get(code, 0),
+                    current_inventory.get(code, 0),
+                )
+            self._cook_food(remaining, character_data, cook_keep_items)
 
         return True
 
@@ -259,14 +270,20 @@ class CombatFoodService:
         keep_items: Mapping[str, int] | None = None,
     ) -> bool:
         """Withdraw food and cook any shortfall before a combat run."""
-        self.workflow_keep_items = dict(keep_items or {})
+        self.reserved_items = dict(keep_items or {})
         self.baseline_inventory = self.character_service.get_inventory()
+        for code in self.allowed_food_codes:
+            baseline_quantity = self.baseline_inventory.get(code, 0)
+            if baseline_quantity:
+                self.reserved_items[code] = (
+                    self.reserved_items.get(code, 0) + baseline_quantity
+                )
         self.provisioned_quantities = {}
         self.used_quantities = {}
         self._provisioning_started = True
         return self._provision_to_target(
             inventory=self.baseline_inventory,
-            keep_items=self.workflow_keep_items,
+            keep_items=self.reserved_items,
         )
 
     def replenish_food(self) -> bool:
@@ -285,7 +302,7 @@ class CombatFoodService:
         try:
             succeeded = self._provision_to_target(
                 character_data,
-                keep_items=self.workflow_keep_items,
+                keep_items=self.reserved_items,
             )
         finally:
             if not self.movement_service.move_to_location(x, y):
@@ -301,18 +318,29 @@ class CombatFoodService:
         if not self._provisioning_started:
             return True
         if not self.provisioned_quantities:
+            self.baseline_inventory = {}
+            self.used_quantities = {}
+            self.reserved_items = {}
             self._provisioning_started = False
             return True
 
         inventory = self.character_service.get_inventory()
         to_deposit = {}
         for code, provisioned in self.provisioned_quantities.items():
-            unused = max(0, provisioned - self.used_quantities.get(code, 0))
+            baseline_quantity = self.baseline_inventory.get(code, 0)
+            used_provisioned = max(
+                0,
+                self.used_quantities.get(code, 0) - baseline_quantity,
+            )
+            unused = max(0, provisioned - used_provisioned)
             quantity = min(unused, inventory.get(code, 0))
             if quantity > 0:
                 to_deposit[code] = quantity
         succeeded = self.banking_service.deposit_items(to_deposit)
         if succeeded:
             self.provisioned_quantities = {}
+            self.baseline_inventory = {}
+            self.used_quantities = {}
+            self.reserved_items = {}
             self._provisioning_started = False
         return succeeded
