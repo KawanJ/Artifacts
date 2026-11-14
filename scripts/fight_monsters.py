@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config.settings import settings
 from src.client.api_client import APIClient
-from scripts.bootstrap import build_services
+from scripts.bootstrap import build_services, extract_character_argument
 
 logging.basicConfig(
     level=settings.log_level,
@@ -26,19 +26,24 @@ def main():
         # Validate settings
         settings.validate()
         logger.info(f"Settings: {settings}")
+
+        arguments, character_name = extract_character_argument(
+            sys.argv[1:],
+            settings.character_name,
+        )
         
         # Get monster code from command line argument or environment variable
         monster_code = None
         fight_count = None
 
         # Check command line arguments first
-        if len(sys.argv) > 1:
-            monster_code = sys.argv[1]
-        if len(sys.argv) > 2:
+        if len(arguments) > 0:
+            monster_code = arguments[0]
+        if len(arguments) > 1:
             try:
-                fight_count = int(sys.argv[2])
+                fight_count = int(arguments[1])
             except ValueError:
-                logger.error(f"Invalid fight count '{sys.argv[2]}'; must be an integer")
+                logger.error(f"Invalid fight count '{arguments[1]}'; must be an integer")
                 return 1
 
         # Then check environment variables (for GitHub Actions or local env)
@@ -60,7 +65,10 @@ def main():
                 fight_count = 1
 
         if not monster_code:
-            logger.error("Monster code not provided. Use: python fight_monsters.py <monster_code> [times]")
+            logger.error(
+                "Monster code not provided. Use: python fight_monsters.py "
+                "<monster_code> [times] [--character NAME]"
+            )
             logger.error("Or set MONSTER_CODE (or MONSTER_NAME) environment variable")
             return 1
 
@@ -79,7 +87,7 @@ def main():
         ) as client:
             services = build_services(
                 client,
-                settings.character_name,
+                character_name,
                 settings.combat_food_allowlist,
                 settings.combat_food_count,
             )

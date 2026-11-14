@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config.settings import settings
 from src.client.api_client import APIClient
-from scripts.bootstrap import build_services
+from scripts.bootstrap import build_services, extract_character_argument
 
 # Configure logging for GitHub Actions
 logging.basicConfig(
@@ -28,14 +28,22 @@ def main():
         settings.validate()
         logger.info(f"Settings: {settings}")
 
+        arguments, character_name = extract_character_argument(
+            sys.argv[1:],
+            settings.character_name,
+        )
+
         # Parse arguments
-        if len(sys.argv) < 3:
-            logger.error("Usage: python level_crafting_skills.py <skill> <item_code>")
+        if len(arguments) < 2:
+            logger.error(
+                "Usage: python level_crafting_skills.py <skill> <item_code> "
+                "[--character NAME]"
+            )
             logger.error("Example: python level_crafting_skills.py weaponcrafting wooden_staff")
             return 1
 
-        skill = sys.argv[1]
-        item_code = sys.argv[2]
+        skill = arguments[0]
+        item_code = arguments[1]
 
         logger.info(f"Upgrading skill '{skill}' by crafting {item_code}")
 
@@ -47,7 +55,7 @@ def main():
         ) as client:
             services = build_services(
                 client,
-                settings.character_name,
+                character_name,
                 settings.combat_food_allowlist,
                 settings.combat_food_count,
             )

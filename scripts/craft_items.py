@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config.settings import settings
 from src.client.api_client import APIClient
-from scripts.bootstrap import build_services
+from scripts.bootstrap import build_services, extract_character_argument
 
 # Configure logging for GitHub Actions
 logging.basicConfig(
@@ -28,19 +28,27 @@ def main():
         settings.validate()
         logger.info(f"Settings: {settings}")
         
+        arguments, character_name = extract_character_argument(
+            sys.argv[1:],
+            settings.character_name,
+        )
+
         # Get item code and optional quantity from command line arguments
-        if len(sys.argv) < 2:
-            logger.error("Usage: python craft_items.py <item_code> [quantity]")
-            logger.error("Example: python craft_items.py wooden_staff 3")
+        if len(arguments) < 1:
+            logger.error(
+                "Usage: python craft_items.py <item_code> [quantity] "
+                "[--character NAME]"
+            )
+            logger.error("Example: python craft_items.py wooden_staff 3 --character NAME")
             return 1
 
-        item_code = sys.argv[1]
+        item_code = arguments[0]
         quantity = 1
-        if len(sys.argv) > 2:
+        if len(arguments) > 1:
             try:
-                quantity = int(sys.argv[2])
+                quantity = int(arguments[1])
             except ValueError:
-                logger.error(f"Invalid quantity '{sys.argv[2]}'; must be an integer")
+                logger.error(f"Invalid quantity '{arguments[1]}'; must be an integer")
                 return 1
 
         logger.info(f"Crafting item: {item_code} x{quantity}")
@@ -54,7 +62,7 @@ def main():
         ) as client:
             services = build_services(
                 client,
-                settings.character_name,
+                character_name,
                 settings.combat_food_allowlist,
                 settings.combat_food_count,
             )

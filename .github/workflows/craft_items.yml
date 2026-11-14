@@ -12,6 +12,10 @@ on:
         required: false
         type: number
         default: 1
+      character_name:
+        description: 'Character to run as (defaults to the configured character)'
+        required: false
+        type: string
 
 jobs:
   craft:
@@ -33,4 +37,5 @@ jobs:
       - name: Run craft items script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
-        run: python scripts/craft_items.py ${{ inputs.item_code }} ${{ inputs.quantity }}
+          CHARACTER_NAME: ${{ inputs.character_name }}
+        run: python scripts/craft_items.py "${{ inputs.item_code }}" ${{ inputs.quantity }} --character "$CHARACTER_NAME"

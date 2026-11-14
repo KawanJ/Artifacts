@@ -12,6 +12,10 @@ on:
         required: false
         type: number
         default: 1
+      character_name:
+        description: 'Character to run as (defaults to the configured character)'
+        required: false
+        type: string
 
 jobs:
   fight:
@@ -33,4 +37,5 @@ jobs:
       - name: Run fight monsters script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
-        run: python scripts/fight_monsters.py ${{ inputs.monster_code }} ${{ inputs.times }}
+          CHARACTER_NAME: ${{ inputs.character_name }}
+        run: python scripts/fight_monsters.py "${{ inputs.monster_code }}" ${{ inputs.times }} --character "$CHARACTER_NAME"

@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.client.api_client import APIClient
 from src.config.settings import settings
-from scripts.bootstrap import build_services
+from scripts.bootstrap import build_services, extract_character_argument
 
 logging.basicConfig(
     level=settings.log_level,
@@ -23,9 +23,13 @@ def main() -> int:
     logger.info("Starting item task automation...")
     try:
         settings.validate()
-        character_name = (
-            os.getenv("ITEM_TASK_CHARACTER_NAME") or settings.character_name
+        arguments, character_name = extract_character_argument(
+            sys.argv[1:],
+            os.getenv("ITEM_TASK_CHARACTER_NAME") or settings.character_name,
         )
+        if arguments:
+            logger.error("Unexpected arguments: %s", arguments)
+            return 1
         with APIClient(
             api_key=settings.api_key,
             base_url=settings.api_base_url,

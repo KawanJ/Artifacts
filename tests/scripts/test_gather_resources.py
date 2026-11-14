@@ -14,6 +14,20 @@ class GatherResourcesScriptTests(ScriptTestCase):
         self.assertEqual(self.api.bank, {"copper_ore": 3})
         self.assertEqual(self.api.inventory, {})
 
+    def test_character_argument_overrides_configured_character(self):
+        with patch.object(
+            gather_resources,
+            "build_services",
+            wraps=gather_resources.build_services,
+        ) as build_services:
+            result = self.run_script(
+                gather_resources,
+                ["copper_ore", "1", "--character", "SelectedCharacter"],
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(build_services.call_args.args[1], "SelectedCharacter")
+
     def test_missing_or_nonpositive_quantity_is_rejected(self):
         self.assertEqual(self.run_script(gather_resources, ["copper_ore"]), 1)
         self.assertEqual(

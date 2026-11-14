@@ -15,6 +15,20 @@ class FightMonstersScriptTests(ScriptTestCase):
         self.assertEqual(self.api.fights, [(0, 1), (0, 1)])
         self.assertEqual(self.api.character["hp"], self.api.character["max_hp"])
 
+    def test_character_argument_overrides_configured_character(self):
+        with patch.object(
+            fight_monsters,
+            "build_services",
+            wraps=fight_monsters.build_services,
+        ) as build_services:
+            result = self.run_script(
+                fight_monsters,
+                ["chicken", "--character", "SelectedCharacter"],
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(build_services.call_args.args[1], "SelectedCharacter")
+
     def test_missing_arguments_use_environment_configuration(self):
         result = self.run_script(
             fight_monsters,

@@ -17,6 +17,25 @@ class LevelCraftingSkillsScriptTests(ScriptTestCase):
         self.assertNotIn("wooden_staff", self.api.inventory)
         self.assertEqual(self.api.gathered, {"copper_ore": 1})
 
+    def test_character_argument_overrides_configured_character(self):
+        with patch.object(
+            level_crafting_skills,
+            "build_services",
+            wraps=level_crafting_skills.build_services,
+        ) as build_services:
+            result = self.run_script(
+                level_crafting_skills,
+                [
+                    "weaponcrafting",
+                    "wooden_staff",
+                    "--character",
+                    "SelectedCharacter",
+                ],
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(build_services.call_args.args[1], "SelectedCharacter")
+
     def test_missing_arguments_and_failed_crafting_stop_the_script(self):
         self.assertEqual(self.run_script(level_crafting_skills, []), 1)
         self.assertEqual(
@@ -39,6 +58,21 @@ class LevelCraftingSkillsScriptTests(ScriptTestCase):
         self.assertEqual(result, 0)
         self.assertEqual(self.api.recycled, {"wooden_staff": 2})
         self.assertEqual(self.api.character["weaponcrafting_level"], 1)
+
+    def test_script_keeps_remaining_recipe_ingredients_in_inventory(self):
+        self.api = type(self.api)(inventory={"copper_ore": 10})
+        self.api.items["wooden_staff"]["craft"]["items"] = [
+            {"code": "copper_ore", "quantity": 2}
+        ]
+
+        result = self.run_script(
+            level_crafting_skills,
+            ["weaponcrafting", "wooden_staff"],
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.api.inventory, {"copper_ore": 8})
+        self.assertEqual(self.api.bank, {})
 
     def test_recycling_failure_stops_and_configuration_errors_are_reported(self):
         self.api.fail_actions.add("recycling")

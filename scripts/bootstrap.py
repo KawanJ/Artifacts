@@ -20,6 +20,33 @@ from src.services.resource_service import ResourceService
 from src.services.task_service import TaskService
 
 
+def extract_character_argument(
+    arguments: list[str],
+    default_character: str,
+) -> tuple[list[str], str]:
+    """Remove an optional --character argument and return its selected name."""
+    remaining = []
+    character_name = default_character
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--character":
+            if (
+                index + 1 >= len(arguments)
+                or arguments[index + 1].startswith("--")
+            ):
+                raise ValueError("--character requires a name.")
+            character_name = arguments[index + 1] or default_character
+            index += 2
+        elif argument.startswith("--character="):
+            character_name = argument.split("=", 1)[1] or default_character
+            index += 1
+        else:
+            remaining.append(argument)
+            index += 1
+    return remaining, character_name
+
+
 @dataclass
 class AutomationServices:
     """Top-level services shared by the command-line scripts."""

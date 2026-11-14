@@ -29,6 +29,21 @@ class CompleteItemTaskScriptTests(ScriptTestCase):
         self.assertEqual(result, 0)
         self.assertEqual(build_services.call_args.args[1], "AnotherCharacter")
 
+    def test_character_argument_overrides_environment_and_configuration(self):
+        with patch.object(
+            complete_item_task,
+            "build_services",
+            wraps=complete_item_task.build_services,
+        ) as build_services:
+            result = self.run_script(
+                complete_item_task,
+                ["--character", "CommandLineCharacter"],
+                {"ITEM_TASK_CHARACTER_NAME": "EnvironmentCharacter"},
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(build_services.call_args.args[1], "CommandLineCharacter")
+
     def test_blank_character_name_uses_configured_character(self):
         with patch.object(
             complete_item_task,

@@ -11,6 +11,10 @@ on:
         description: 'Code of the item to craft for XP'
         required: true
         type: string
+      character_name:
+        description: 'Character to run as (defaults to the configured character)'
+        required: false
+        type: string
 
 jobs:
   level_crafting_skills:
@@ -32,7 +36,9 @@ jobs:
       - name: Run level-crafting-skills script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
+          CHARACTER_NAME: ${{ inputs.character_name }}
         run: |
           python scripts/level_crafting_skills.py \
             ${{ inputs.skill }} \
-            ${{ inputs.item_code }}
+            ${{ inputs.item_code }} \
+            --character "$CHARACTER_NAME"

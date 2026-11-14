@@ -67,11 +67,15 @@ corresponding script.
 
 | Workflow | Inputs | Script |
 | --- | --- | --- |
-| Gather Resources | `resource_code`, `amount` (default `1`) | `scripts/gather_resources.py` |
-| Craft Items | `item_code`, `quantity` (default `1`) | `scripts/craft_items.py` |
-| Fight Monsters | `monster_code`, `times` (default `1`) | `scripts/fight_monsters.py` |
-| Level crafting skills | `skill`, `item_code` | `scripts/level_crafting_skills.py` |
+| Gather Resources | `resource_code`, `amount` (default `1`), `character_name` (optional; defaults to the configured character) | `scripts/gather_resources.py` |
+| Craft Items | `item_code`, `quantity` (default `1`), `character_name` (optional; defaults to the configured character) | `scripts/craft_items.py` |
+| Fight Monsters | `monster_code`, `times` (default `1`), `character_name` (optional; defaults to the configured character) | `scripts/fight_monsters.py` |
+| Level crafting skills | `skill`, `item_code`, `character_name` (optional; defaults to the configured character) | `scripts/level_crafting_skills.py` |
 | Complete Item Task | `character_name` (optional; defaults to the configured character); resumes an active item task or accepts one | `scripts/complete_item_task.py` |
+
+Each script accepts `--character NAME` to override the configured default
+character. In GitHub Actions, the `character_name` input provides the same
+optional override.
 
 ### Complete an item task
 

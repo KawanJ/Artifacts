@@ -13,6 +13,20 @@ class CraftItemsScriptTests(ScriptTestCase):
         self.assertEqual(self.api.gathered, {"copper_ore": 2})
         self.assertEqual(self.api.inventory, {"wooden_staff": 2})
 
+    def test_character_argument_overrides_configured_character(self):
+        with patch.object(
+            craft_items,
+            "build_services",
+            wraps=craft_items.build_services,
+        ) as build_services:
+            result = self.run_script(
+                craft_items,
+                ["wooden_staff", "--character", "SelectedCharacter"],
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(build_services.call_args.args[1], "SelectedCharacter")
+
     def test_missing_or_invalid_arguments_are_rejected(self):
         self.assertEqual(self.run_script(craft_items, []), 1)
         self.assertEqual(

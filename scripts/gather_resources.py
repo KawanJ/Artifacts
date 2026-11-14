@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config.settings import settings
 from src.client.api_client import APIClient
-from scripts.bootstrap import build_services
+from scripts.bootstrap import build_services, extract_character_argument
 
 # Configure logging for GitHub Actions
 logging.basicConfig(
@@ -27,20 +27,28 @@ def main():
         # Validate settings
         settings.validate()
         logger.info(f"Settings: {settings}")
+
+        arguments, character_name = extract_character_argument(
+            sys.argv[1:],
+            settings.character_name,
+        )
         
         # Get resource code and amount from command line arguments
-        if len(sys.argv) < 3:
-            logger.error("Usage: python gather_resources.py <resource_code> <amount>")
+        if len(arguments) < 2:
+            logger.error(
+                "Usage: python gather_resources.py <resource_code> <amount> "
+                "[--character NAME]"
+            )
             logger.error("Example: python gather_resources.py copper_ore 5")
             return 1
             
-        resource_code = sys.argv[1]
+        resource_code = arguments[0]
         try:
-            amount = int(sys.argv[2])
+            amount = int(arguments[1])
             if amount <= 0:
                 raise ValueError("Amount must be positive")
         except ValueError as e:
-            logger.error(f"Invalid amount '{sys.argv[2]}': {e}")
+            logger.error(f"Invalid amount '{arguments[1]}': {e}")
             return 1
             
         logger.info(f"Gathering {amount}x {resource_code}")
@@ -54,7 +62,7 @@ def main():
         ) as client:
             services = build_services(
                 client,
-                settings.character_name,
+                character_name,
                 settings.combat_food_allowlist,
                 settings.combat_food_count,
             )

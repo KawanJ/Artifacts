@@ -12,6 +12,10 @@ on:
         required: true
         type: number
         default: 1
+      character_name:
+        description: 'Character to run as (defaults to the configured character)'
+        required: false
+        type: string
 
 jobs:
   gather:
@@ -33,4 +37,5 @@ jobs:
       - name: Run gather resources script
         env:
           ARTIFACTS_API_KEY: ${{ secrets.ARTIFACTS_API_KEY }}
-        run: python scripts/gather_resources.py "${{ inputs.resource_code }}" ${{ inputs.amount }}
+          CHARACTER_NAME: ${{ inputs.character_name }}
+        run: python scripts/gather_resources.py "${{ inputs.resource_code }}" ${{ inputs.amount }} --character "$CHARACTER_NAME"
