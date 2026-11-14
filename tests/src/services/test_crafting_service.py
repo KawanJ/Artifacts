@@ -98,6 +98,52 @@ class CraftingServiceTests(unittest.TestCase):
         self.assertEqual(api.inventory, {"chicken_stew": 1})
         self.assertEqual(api.crafted, {"chicken_stew": 1})
 
+    def test_recipe_withdraws_banked_ingredients_before_farming_shortfall(self):
+        slime_drop = {"code": "yellow_slime", "quantity": 1}
+        api = FakeGameAPI(
+            inventory={"yellow_slime": 10, "junk": 9},
+            fight_drops=[slime_drop],
+        )
+        api.items["yellow_slime"] = {
+            "code": "yellow_slime",
+            "type": "resource",
+            "subtype": "mob",
+        }
+        api.items["copper_bar"] = {
+            "code": "copper_bar",
+            "type": "material",
+            "craft": {
+                "skill": "mining",
+                "items": [{"code": "copper_ore", "quantity": 2}],
+                "quantity": 1,
+            },
+        }
+        api.items["recipe_item"] = {
+            "code": "recipe_item",
+            "type": "material",
+            "craft": {
+                "skill": "weaponcrafting",
+                "items": [
+                    {"code": "yellow_slime", "quantity": 2},
+                    {"code": "copper_bar", "quantity": 5},
+                ],
+                "quantity": 1,
+            },
+        }
+        api.monsters["chicken"]["drops"] = [slime_drop]
+        services = build_services(api, "tester", (), 0)
+
+        self.assertTrue(services.crafting.craft_item("recipe_item"))
+        self.assertEqual(api.bank["yellow_slime"], 8)
+        self.assertEqual(api.fights, [])
+
+        self.assertTrue(services.recycling.recycle_item("recipe_item"))
+        self.assertTrue(services.crafting.craft_item("recipe_item"))
+
+        self.assertEqual(api.fights, [])
+        self.assertEqual(api.bank["yellow_slime"], 6)
+        self.assertEqual(api.inventory, {"recipe_item": 1})
+
     def test_missing_dependency_metadata_stops_before_crafting(self):
         api = FakeGameAPI()
         api.items["copper_ore"] = None

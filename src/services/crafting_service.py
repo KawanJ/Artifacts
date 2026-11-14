@@ -7,6 +7,7 @@ from src.client.api_client import APIClient
 from src.domain.world import get_crafting_location
 from src.services.combat.combat_service import CombatService
 from src.services.character_service import CharacterService
+from src.services.inventory.bank_service import BankService
 from src.services.inventory.inventory_cleanup_service import InventoryCleanupService
 from src.services.items.item_catalog_service import ItemCatalogService
 from src.services.movement_service import MovementService
@@ -22,6 +23,7 @@ class CraftingService:
         self,
         movement_service: MovementService,
         cleanup_service: InventoryCleanupService,
+        bank_service: BankService,
         item_service: ItemCatalogService,
         character_service: CharacterService,
         resource_service: ResourceService,
@@ -32,6 +34,7 @@ class CraftingService:
         """Initialize the crafting service."""
         self.movement_service = movement_service
         self.cleanup_service = cleanup_service
+        self.bank_service = bank_service
         self.item_service = item_service
         self.character_service = character_service
         self.resource_service = resource_service
@@ -45,7 +48,6 @@ class CraftingService:
         multiplier: int = 1,
         inventory: Optional[Dict[str, int]] = None,
         keep_items: Mapping[str, int] | None = None,
-        required_item_codes: set[str] | None = None,
     ) -> bool:
         """Gather all base resources required by an item (recursively).
 
@@ -54,7 +56,6 @@ class CraftingService:
             multiplier: How many times the item will be crafted.
             inventory: Current inventory map ({code: quantity}).
             keep_items: Quantities reserved by the current crafting operation.
-            required_item_codes: Recipe ingredient codes used by the operation.
 
         Returns:
             True if gathering succeeded, False otherwise.
@@ -72,8 +73,6 @@ class CraftingService:
 
             if not required_code or required_quantity <= 0:
                 continue
-            if required_item_codes is not None:
-                required_item_codes.add(required_code)
             total_required_quantity = required_quantity
 
             # First use anything already in inventory
@@ -95,6 +94,23 @@ class CraftingService:
                     f"need {required_quantity} more"
                 )
 
+            bank_quantity = self.bank_service.get_bank_item_quantity(required_code)
+            withdraw_quantity = min(required_quantity, bank_quantity)
+            if withdraw_quantity:
+                logger.info(
+                    "Withdrawing %s required %s from the bank.",
+                    withdraw_quantity,
+                    required_code,
+                )
+                if not self.bank_service.withdraw_items(
+                    {required_code: withdraw_quantity}
+                ):
+                    logger.error("Could not withdraw required %s from the bank.", required_code)
+                    return False
+                required_quantity -= withdraw_quantity
+                if required_quantity == 0:
+                    continue
+
             required_item = self.item_service.get_item(required_code)
             if not required_item:
                 logger.error(f"Failed to fetch item metadata for {required_code}")
@@ -110,11 +126,6 @@ class CraftingService:
                     required_quantity,
                     inventory,
                     keep_items or {},
-                    (
-                        required_item_codes
-                        if required_item_codes is not None
-                        else set()
-                    ),
                 ):
                     return False
                 available_after = self.character_service.get_inventory().get(
@@ -200,31 +211,13 @@ class CraftingService:
             True if successful, False otherwise.
         """
         success = False
-        required_item_codes: set[str] = set()
         try:
             if inventory is None:
                 inventory = self.character_service.get_inventory()
-            success = self._craft_item(
-                item_code,
-                quantity,
-                inventory,
-                {},
-                required_item_codes,
-            )
-            keep_items: Dict[str, int] = {}
-            if success:
-                current_inventory = self.character_service.get_inventory()
-                keep_items = {
-                    code: current_inventory[code]
-                    for code in required_item_codes
-                    if code in current_inventory
-                }
-                keep_items[item_code] = quantity
+            success = self._craft_item(item_code, quantity, inventory, {})
         except Exception as e:
             logger.error(f"Failed to craft item {item_code}: {e}")
-            if success:
-                return False
-            keep_items = {}
+        keep_items = {item_code: quantity} if success else {}
         if not self.cleanup_service.deposit_unneeded_items(keep_items):
             logger.error("Failed to deposit unneeded items after crafting.")
             return False
@@ -236,7 +229,6 @@ class CraftingService:
         quantity: int,
         inventory: Dict[str, int],
         inherited_keep_items: Mapping[str, int],
-        required_item_codes: set[str],
     ) -> bool:
         """Craft one item recursively without ending the containing operation."""
         item_data = self.item_service.get_item(item_code)
@@ -264,7 +256,6 @@ class CraftingService:
             multiplier=quantity,
             inventory=inventory,
             keep_items=recipe_keep_items,
-            required_item_codes=required_item_codes,
         ):
             return False
 

@@ -114,6 +114,7 @@ def build_services(
     crafting = CraftingService(
         movement,
         cleanup,
+        bank,
         items,
         character,
         resource,
